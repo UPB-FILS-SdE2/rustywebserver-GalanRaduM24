@@ -137,3 +137,65 @@ fn test_script_execution_success() {
     stop_server(&mut server);
     fs::remove_file(&script_path).expect("Failed to remove script file");
 }
+
+#[test]
+fn test_usage_message() {
+    let output = Command::new("cargo")
+        .arg("run")
+        .arg("--")
+        .arg("rustwebserver")
+        .output()
+        .expect("Failed to execute command");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage: rustwebserver <port> <root_folder>"));
+}
+
+#[test]
+fn test_correct_command() {
+    let server_handle = thread::spawn(|| {
+        let output = Command::new("cargo")
+            .arg("run")
+            .arg("--")
+            .arg("8080")
+            .arg("/some/root/folder")
+            .output()
+            .expect("Failed to execute command");
+
+        println!("{:?}", output);
+    });
+
+    // Give the server some time to start
+    thread::sleep(Duration::from_secs(2));
+
+    let client = Client::new();
+    let res = client.get("http://localhost:8080").send();
+    assert!(res.is_ok());
+
+    server_handle.join().expect("The server thread has panicked");
+}
+
+#[test]
+fn test_missing_arguments() {
+    let output = Command::new("cargo")
+        .arg("run")
+        .arg("--")
+        .output()
+        .expect("Failed to execute command");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage:"));
+}
+
+#[test]
+fn test_invalid_command() {
+    let output = Command::new("cargo")
+        .arg("run")
+        .arg("--")
+        .arg("invalid_command")
+        .output()
+        .expect("Failed to execute command");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage:"));
+}
