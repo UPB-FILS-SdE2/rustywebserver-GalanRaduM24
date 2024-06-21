@@ -182,11 +182,6 @@ async fn execute_script(
                 .output()
                 .await
                 .expect("Failed to execute script")
-        } else {
-            // Handle the case where method is not GET, if applicable
-            // Example: let body = get_request_body(&request).unwrap_or_default();
-            // Then use 'body' as needed
-            unimplemented!("Handle non-GET method body handling here");
         };
 
         if output.status.success() {
