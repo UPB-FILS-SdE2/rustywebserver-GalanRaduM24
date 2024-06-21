@@ -41,7 +41,8 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
     // Read HTTP request
     let mut buffer = [0; 1024];
     stream.read(&mut buffer)?;
-    let request = String::from_utf8_lossy(&buffer[..]);
+    let request = String::from_utf8_lossy(&buffer[..]).to_string();
+    let lines: Vec<&str> = request.lines().collect();
 
     // Parse the HTTP request
     let (method, path, query) = {
@@ -71,7 +72,7 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
 
     // Delegate to the appropriate handler based on the HTTP method
     match method.as_str() {
-        "GET" => handle_get_request(&mut stream, &root_folder, &path, query).await,
+        "GET" => handle_get_request( &mut stream, &root_folder, &path, query).await,
         "POST" => handle_post_request(&mut stream, &root_folder, &path, &request).await,
         _ => {
             println!("{} 127.0.0.1 {} -> 405 (Method Not Allowed)", method, path);
@@ -100,10 +101,25 @@ async fn handle_get_request(
         return Ok(());
     }
 
-    // Check if the requested file exists and is a file
+    // Handle scripts in the /scripts/ directory
+    if path.starts_with("/scripts/") {
+        match execute_script(&full_path, &query, path, "GET").await {
+            Ok(response) => stream.write_all(&response)?,
+            Err(_) => {
+                println!("GET 127.0.0.1 {} -> 500 (Internal Server Error)", path);
+                let response =
+                    b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
+                stream.write_all(response)?;
+            }
+        }
+        return Ok(());
+    }
+
+    // Serve static files if the path is not forbidden and not in /scripts/
     if full_path.is_file() {
         // Read the file contents
         let contents = fs::read(&full_path)?;
+
         // Determine the MIME type of the file
         let mime_type = determine_content_type(&full_path);
 
@@ -114,7 +130,11 @@ async fn handle_get_request(
             mime_type,
             contents.len(),
         );
+        
+        // Write the response header
         stream.write_all(response.as_bytes())?;
+        
+        // Write the file contents
         stream.write_all(&contents)?;
     } else {
         // File not found
@@ -126,6 +146,87 @@ async fn handle_get_request(
     Ok(())
 }
 
+// Function to execute scripts located in /scripts/ directory
+async fn execute_script(
+    script_path: &Path,
+    query: &Option<String>,
+    path: &str,
+    method: &str,
+) -> io::Result<Vec<u8>> {
+    if script_path.is_file() {
+        let mut cmd = Command::new(&script_path);
+
+        // Set environment variables from query parameters
+        if let Some(query_string) = query {
+            let query_pairs = query_string.split('&').map(|pair| {
+                let mut split = pair.split('=');
+                (
+                    split.next().unwrap_or("").to_string(),
+                    split.next().unwrap_or("").to_string(),
+                )
+            });
+
+            for (key, value) in query_pairs {
+                let env_var = format!("Query_{}", key);
+                cmd.env(env_var, value);
+            }
+        }
+
+        // Additional environment variables required by the script
+        cmd.env("Method", method);
+        cmd.env("Path", path);
+
+        let output = if method == "GET" {
+            cmd.stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await
+                .expect("Failed to execute script")
+        } else {
+            // Handle the case where method is not GET, if applicable
+            // Example: let body = get_request_body(&request).unwrap_or_default();
+            // Then use 'body' as needed
+            unimplemented!("Handle non-GET method body handling here");
+        };
+
+        if output.status.success() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            let (headers, body_start_index) = parse_headers(&output_str);
+            let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+            let content_type = headers.iter().find(|&&(ref k, _)| k == "Content-type")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| "text/plain".to_string());
+            let content_length = headers.iter().find(|&&(ref k, _)| k == "Content-length")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| body.len().to_string());
+
+            println!("{} 127.0.0.1 {} -> 200 (OK)", method, path);
+
+            Ok(format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                content_type, content_length, body
+            ).as_bytes().to_vec())
+        } else {
+            println!("{} 127.0.0.1 {} -> 500 (Internal Server Error)", method, path);
+            Ok(b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>".to_vec())
+        }
+    } else {
+        println!("{} 127.0.0.1 {} -> 404 (Not Found)", method, path);
+        Ok(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>".to_vec())
+    }
+}
+
+// Function to retrieve the body of an HTTP request
+fn get_request_body(request: &str) -> Option<String> {
+    // Split the request into headers and body parts
+    let mut parts = request.split("\r\n\r\n");
+
+    // Skip the headers to get to the body
+    let body = parts.nth(1)?;
+
+    // Convert the body to a String and return it
+    Some(body.to_string())
+}
 
 fn determine_content_type(file_path: &Path) -> &'static str {
     match file_path.extension().and_then(|ext| ext.to_str()) {
