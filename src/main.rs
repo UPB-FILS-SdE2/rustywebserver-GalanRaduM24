@@ -182,6 +182,9 @@ async fn execute_script(
                 .output()
                 .await
                 .expect("Failed to execute script")
+        } else {
+
+            unimplemented!("Handle non-GET method body handling here");
         };
 
         if output.status.success() {
