@@ -104,12 +104,11 @@ async fn handle_get_request(
     // Handle scripts in the /scripts/ directory
     if path.starts_with("/scripts/") {
         match execute_script(&full_path, &query, path, "GET").await {
-            Ok(response) => {
-                stream.write_all(&response)?;
-            },
+            Ok(response) => stream.write_all(&response)?,
             Err(_) => {
                 println!("GET 127.0.0.1 {} -> 500 (Internal Server Error)", path);
-                let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
+                let response =
+                    b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
                 stream.write_all(response)?;
             }
         }
@@ -119,7 +118,7 @@ async fn handle_get_request(
     // Serve static files if the path is not forbidden and not in /scripts/
     if full_path.is_file() {
         // Read the file contents
-        let contents = tokio::fs::read(&full_path).await?;
+        let contents = fs::read(&full_path)?;
 
         // Determine the MIME type of the file
         let mime_type = determine_content_type(&full_path);
@@ -131,10 +130,10 @@ async fn handle_get_request(
             mime_type,
             contents.len(),
         );
-
+        
         // Write the response header
         stream.write_all(response.as_bytes())?;
-
+        
         // Write the file contents
         stream.write_all(&contents)?;
     } else {
@@ -145,30 +144,6 @@ async fn handle_get_request(
     }
 
     Ok(())
-}
-
-// Determine the MIME type of a file based on its extension
-fn determine_content_type(file_path: &Path) -> &'static str {
-    match file_path.extension().and_then(|ext| ext.to_str()) {
-        Some("html") => "text/html",
-        Some("htm") => "text/html",
-        Some("txt") => "text/plain",
-        Some("css") => "text/css",
-        Some("js") => "application/javascript",
-        Some("json") => "application/json",
-        Some("png") => "image/png",
-        Some("jpg") => "image/jpeg",
-        Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("ico") => "image/x-icon",
-        Some("svg") => "image/svg+xml",
-        Some("pdf") => "application/pdf",
-        Some("zip") => "application/zip",
-        Some("tar") => "application/x-tar",
-        Some("gz") => "application/gzip",
-        Some(_) => "application/octet-stream", // default binary
-        None => "application/octet-stream",    // default binary
-    }
 }
 
 // Function to execute scripts located in /scripts/ directory
@@ -208,26 +183,18 @@ async fn execute_script(
                 .await
                 .expect("Failed to execute script")
         } else {
-            // Handle non-GET methods here if needed
+
             unimplemented!("Handle non-GET method body handling here");
         };
 
         if output.status.success() {
             let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
-            let body = output_str
-                .lines()
-                .skip(body_start_index)
-                .collect::<Vec<_>>()
-                .join("\n");
-            let content_type = headers
-                .iter()
-                .find(|&&(ref k, _)| k == "Content-Type")
+            let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+            let content_type = headers.iter().find(|&&(ref k, _)| k == "Content-type")
                 .map(|&(_, ref v)| v.clone())
-                .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-            let content_length = headers
-                .iter()
-                .find(|&&(ref k, _)| k == "Content-Length")
+                .unwrap_or_else(|| "text/plain".to_string());
+            let content_length = headers.iter().find(|&&(ref k, _)| k == "Content-length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -236,9 +203,7 @@ async fn execute_script(
             Ok(format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
-            )
-            .as_bytes()
-            .to_vec())
+            ).as_bytes().to_vec())
         } else {
             println!("{} 127.0.0.1 {} -> 500 (Internal Server Error)", method, path);
             Ok(b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>".to_vec())
@@ -247,6 +212,21 @@ async fn execute_script(
         println!("{} 127.0.0.1 {} -> 404 (Not Found)", method, path);
         Ok(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>".to_vec())
     }
+}
+
+fn determine_content_type(file_path: &Path) -> &'static str {
+    match file_path.extension().and_then(|ext| ext.to_str()) {
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("html") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("jpg") => "image/jpeg",
+        Some("jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("zip") => "application/zip",
+        _ => "application/octet-stream",
+    }
+
 }
 
 // Asynchronous function to handle POST requests
@@ -352,7 +332,7 @@ fn extract_query_string(request: &str) -> Option<&str> {
     None
 }
 
-// Function to parse HTTP headers from a string
+// Function to parse headers from the script output
 fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
     let mut body_start_index = 0;
@@ -387,161 +367,3 @@ fn parse_header_line(line: &str) -> Option<(String, String)> {
         None
     }
 }
-
-
-/* 
-use std::env;
-use std::fs;
-use std::io::{self, Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
-use tokio::process::Command;
-use std::process::Stdio;
-use tokio::runtime::Runtime;
-
-
-#[tokio::main]
-async fn main() {
-    // Parse command-line arguments
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 3 {
-        eprintln!("Usage: {} <port> <root_folder>", args[0]);
-        std::process::exit(1);
-    }
-
-    let port = args[1].parse::<u16>().expect("Invalid port number");
-    let root_folder = Path::new(&args[2]).to_path_buf();
-
-    // Print startup information
-    println!("Root folder: {}", root_folder.display());
-    println!("Server listening on 0.0.0.0:{}", port);
-
-    // Start server
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))?;
-    for stream in listener.incoming() {
-        let stream = stream?;
-        let root_folder = root_folder.clone();
-        tokio::spawn(async move {
-            handle_connection(stream, root_folder).await.unwrap();
-        });
-    }
-
-    Ok(())
-}
-
-async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
-    // Read HTTP request
-    let mut buffer = [0; 1024];
-    stream.read(&mut buffer)?;
-
-    // Parse HTTP request
-    let request = String::from_utf8_lossy(&buffer[..]);
-    let mut lines = request.lines();
-    if let Some(request_line) = lines.next() {
-        let mut parts = request_line.split_whitespace();
-        let method = parts.next().unwrap_or("");
-        let path = parts.next().unwrap_or("");
-        let _version = parts.next().unwrap_or(""); // HTTP version (not used)
-
-        // Normalize path to avoid directory traversal
-        let requested_path = Path::new(&path);
-        let full_path = root_folder.join(requested_path.strip_prefix("/").unwrap_or(requested_path));
-
-        // Log the request
-        let request_source = stream.peer_addr().unwrap().ip();
-        println!("{} {} ->", method, path);
-
-        match method {
-            "GET" => {
-                handle_get_request(&mut stream, &full_path).await?;
-            }
-            "POST" => {
-                handle_post_request(&mut stream, &full_path).await?;
-            }
-            _ => {
-                // Unsupported method
-                let response = "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n";
-                stream.write_all(response.as_bytes())?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_get_request(stream: &mut TcpStream, full_path: &Path) -> io::Result<()> {
-    // Check if file exists
-    if full_path.is_file() {
-        // Determine content type based on file extension
-        let content_type = determine_content_type(&full_path);
-        let file_content = fs::read(&full_path)?;
-
-        // Respond with file contents
-        let response = format!(
-            "HTTP/1.1 127.0.0.1 {} 200 (OK)", content_type
-            // "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            // content_type,
-            // file_content.len()
-        );
-        stream.write_all(response.as_bytes())?;
-        stream.write_all(&file_content)?;
-    } else {
-        // File not found
-        let response = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
-        stream.write_all(response.as_bytes())?;
-    }
-
-    Ok(())
-}
-
-async fn handle_post_request(stream: &mut TcpStream, script_path: &Path) -> io::Result<()> {
-    // Check if script file exists
-    if script_path.is_file() {
-        // Execute the script
-        let output = Command::new(script_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await?;
-
-        // Handle script execution result
-        if output.status.success() {
-            // Script executed successfully
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{}",
-                stdout
-            );
-            stream.write_all(response.as_bytes())?;
-        } else {
-            // Script execution failed
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let response = format!(
-                "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n{}",
-                stderr
-            );
-            stream.write_all(response.as_bytes())?;
-        }
-    } else {
-        // Script not found
-        let response = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
-        stream.write_all(response.as_bytes())?;
-    }
-
-    Ok(())
-}
-
-fn determine_content_type(file_path: &Path) -> &'static str {
-    match file_path.extension().and_then(|ext| ext.to_str()) {
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("html") => "text/html; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("jpg") => "image/jpeg",
-        Some("jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        Some("zip") => "application/zip",
-        _ => "application/octet-stream",
-    }
-}
-*/
