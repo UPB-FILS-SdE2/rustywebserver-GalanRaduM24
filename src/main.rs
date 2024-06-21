@@ -226,7 +226,7 @@ fn determine_content_type(file_path: &Path) -> &'static str {
         Some("zip") => "application/zip",
         _ => "application/octet-stream",
     }
-    
+
 }
 
 // Asynchronous function to handle POST requests
@@ -244,26 +244,12 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set environment variables from query parameters
+        // Set query parameters as environment variable
         if let Some(query) = extract_query_string(request) {
-            let query_pairs = query.split('&').map(|pair| {
-                let mut split = pair.split('=');
-                (
-                    split.next().unwrap_or("").to_string(),
-                    split.next().unwrap_or("").to_string(),
-                )
-            });
-
-            for (key, value) in query_pairs {
-                let env_var = format!("Query_{}", key);
-                cmd.env(env_var, value);
-            }
+            cmd.env("QUERY_STRING", query);
         }
 
-        // Additional environment variables required by the script
-        cmd.env("Method", "POST");
-        cmd.env("Path", path);
-
+        // Execute script
         let output = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
