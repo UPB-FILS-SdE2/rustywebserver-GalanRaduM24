@@ -226,6 +226,7 @@ fn determine_content_type(file_path: &Path) -> &'static str {
         Some("zip") => "application/zip",
         _ => "application/octet-stream",
     }
+    
 }
 
 // Asynchronous function to handle POST requests
