@@ -214,18 +214,6 @@ async fn execute_script(
     }
 }
 
-// Function to retrieve the body of an HTTP request
-fn get_request_body(request: &str) -> Option<String> {
-    // Split the request into headers and body parts
-    let mut parts = request.split("\r\n\r\n");
-
-    // Skip the headers to get to the body
-    let body = parts.nth(1)?;
-
-    // Convert the body to a String and return it
-    Some(body.to_string())
-}
-
 fn determine_content_type(file_path: &Path) -> &'static str {
     match file_path.extension().and_then(|ext| ext.to_str()) {
         Some("txt") => "text/plain; charset=utf-8",
@@ -240,16 +228,20 @@ fn determine_content_type(file_path: &Path) -> &'static str {
     }
 }
 
+// Asynchronous function to handle POST requests
 async fn handle_post_request(
-    stream: &mut std::net::TcpStream,
+    stream: &mut TcpStream,
     root_folder: &PathBuf,
     path: &str,
     request: &str,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     let full_path = root_folder.join(&path[1..]);
 
     if full_path.is_file() {
         let mut cmd = Command::new(&full_path);
+
+        // Extract request body to pass as input to script
+        let body = extract_request_body(request);
 
         // Set environment variables from query parameters
         if let Some(query) = extract_query_string(request) {
@@ -286,16 +278,15 @@ async fn handle_post_request(
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
-            .iter()
-            .find(|&&(ref k, _)| *k == "Content-Type")
-            .map(|&(_, ref v)| v.clone())
-            .unwrap_or_else(|| "text/plain".to_string());
-        
-        let content_length = headers
-            .iter()
-            .find(|&&(ref k, _)| *k == "Content-Length")
-            .map(|&(_, ref v)| v.clone())
-            .unwrap_or_else(|| body.len().to_string());
+                .iter()
+                .find(|&&(ref k, _)| *k == "Content-Type")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| "text/plain".to_string());
+            let content_length = headers
+                .iter()
+                .find(|&&(ref k, _)| *k == "Content-Length")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| body.len().to_string());
 
             println!("POST 127.0.0.1 {} -> 200 (OK)", path);
 
@@ -319,6 +310,18 @@ async fn handle_post_request(
     Ok(())
 }
 
+// Function to extract request body from the HTTP request
+fn extract_request_body(request: &str) -> String {
+    // Find the start of the body after headers
+    if let Some(start_index) = request.find("\r\n\r\n") {
+        let body_start = start_index + 4; // Skip "\r\n\r\n"
+        request[body_start..].to_string()
+    } else {
+        String::new()
+    }
+}
+
+// Function to extract query string from the HTTP request
 fn extract_query_string(request: &str) -> Option<&str> {
     // Find the start of the request line
     if let Some(start_index) = request.find("\r\n") {
@@ -338,6 +341,7 @@ fn extract_query_string(request: &str) -> Option<&str> {
     None
 }
 
+// Function to parse headers from the script output
 fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
     let mut body_start_index = 0;
@@ -362,6 +366,7 @@ fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     (headers, body_start_index)
 }
 
+// Function to parse a single header line into key-value pair
 fn parse_header_line(line: &str) -> Option<(String, String)> {
     if let Some(separator_index) = line.find(':') {
         let key = line[..separator_index].trim().to_string();
