@@ -104,11 +104,12 @@ async fn handle_get_request(
     // Handle scripts in the /scripts/ directory
     if path.starts_with("/scripts/") {
         match execute_script(&full_path, &query, path, "GET").await {
-            Ok(response) => stream.write_all(&response)?,
+            Ok(response) => {
+                stream.write_all(&response)?;
+            },
             Err(_) => {
                 println!("GET 127.0.0.1 {} -> 500 (Internal Server Error)", path);
-                let response =
-                    b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
+                let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
                 stream.write_all(response)?;
             }
         }
@@ -118,7 +119,7 @@ async fn handle_get_request(
     // Serve static files if the path is not forbidden and not in /scripts/
     if full_path.is_file() {
         // Read the file contents
-        let contents = fs::read(&full_path)?;
+        let contents = tokio::fs::read(&full_path).await?;
 
         // Determine the MIME type of the file
         let mime_type = determine_content_type(&full_path);
@@ -130,10 +131,10 @@ async fn handle_get_request(
             mime_type,
             contents.len(),
         );
-        
+
         // Write the response header
         stream.write_all(response.as_bytes())?;
-        
+
         // Write the file contents
         stream.write_all(&contents)?;
     } else {
@@ -144,6 +145,30 @@ async fn handle_get_request(
     }
 
     Ok(())
+}
+
+// Determine the MIME type of a file based on its extension
+fn determine_content_type(file_path: &Path) -> &'static str {
+    match file_path.extension().and_then(|ext| ext.to_str()) {
+        Some("html") => "text/html",
+        Some("htm") => "text/html",
+        Some("txt") => "text/plain",
+        Some("css") => "text/css",
+        Some("js") => "application/javascript",
+        Some("json") => "application/json",
+        Some("png") => "image/png",
+        Some("jpg") => "image/jpeg",
+        Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("ico") => "image/x-icon",
+        Some("svg") => "image/svg+xml",
+        Some("pdf") => "application/pdf",
+        Some("zip") => "application/zip",
+        Some("tar") => "application/x-tar",
+        Some("gz") => "application/gzip",
+        Some(_) => "application/octet-stream", // default binary
+        None => "application/octet-stream",    // default binary
+    }
 }
 
 // Function to execute scripts located in /scripts/ directory
@@ -183,18 +208,26 @@ async fn execute_script(
                 .await
                 .expect("Failed to execute script")
         } else {
-
+            // Handle non-GET methods here if needed
             unimplemented!("Handle non-GET method body handling here");
         };
 
         if output.status.success() {
             let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
-            let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
-            let content_type = headers.iter().find(|&&(ref k, _)| k == "Content-type")
+            let body = output_str
+                .lines()
+                .skip(body_start_index)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let content_type = headers
+                .iter()
+                .find(|&&(ref k, _)| k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
-                .unwrap_or_else(|| "text/plain".to_string());
-            let content_length = headers.iter().find(|&&(ref k, _)| k == "Content-length")
+                .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+            let content_length = headers
+                .iter()
+                .find(|&&(ref k, _)| k == "Content-Length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -203,7 +236,9 @@ async fn execute_script(
             Ok(format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
-            ).as_bytes().to_vec())
+            )
+            .as_bytes()
+            .to_vec())
         } else {
             println!("{} 127.0.0.1 {} -> 500 (Internal Server Error)", method, path);
             Ok(b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>".to_vec())
@@ -212,21 +247,6 @@ async fn execute_script(
         println!("{} 127.0.0.1 {} -> 404 (Not Found)", method, path);
         Ok(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>".to_vec())
     }
-}
-
-fn determine_content_type(file_path: &Path) -> &'static str {
-    match file_path.extension().and_then(|ext| ext.to_str()) {
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("html") => "text/html; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("jpg") => "image/jpeg",
-        Some("jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        Some("zip") => "application/zip",
-        _ => "application/octet-stream",
-    }
-
 }
 
 // Asynchronous function to handle POST requests
@@ -332,7 +352,7 @@ fn extract_query_string(request: &str) -> Option<&str> {
     None
 }
 
-// Function to parse headers from the script output
+// Function to parse HTTP headers from a string
 fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
     let mut body_start_index = 0;
