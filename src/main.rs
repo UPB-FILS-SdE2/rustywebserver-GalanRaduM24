@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use std::process::Stdio;
-use tokio::runtime::Runtime;
-
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -27,14 +25,15 @@ async fn main() -> io::Result<()> {
 
     // Start server
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))?;
-    for stream in listener.incoming() {
-        let stream = stream?;
+    loop {
+        let (stream, _) = listener.accept()?;
         let root_folder = root_folder.clone();
         tokio::spawn(async move {
-            handle_connection(stream, root_folder).await.unwrap();
+            if let Err(e) = handle_connection(stream, root_folder).await {
+                eprintln!("Error handling connection: {}", e);
+            }
         });
     }
-    Ok(())
 }
 
 
