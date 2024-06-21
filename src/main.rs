@@ -86,9 +86,10 @@ async fn handle_get_request(stream: &mut TcpStream, full_path: &Path) -> io::Res
 
         // Respond with file contents
         let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            content_type,
-            file_content.len()
+            "GET 127.0.0.1 {} 200 (OK)", content_type
+            // "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            // content_type,
+            // file_content.len()
         );
         stream.write_all(response.as_bytes())?;
         stream.write_all(&file_content)?;
