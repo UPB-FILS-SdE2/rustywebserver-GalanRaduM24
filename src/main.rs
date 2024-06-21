@@ -3,10 +3,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use tokio::process::Command;
-use std::process::Stdio;
-use tokio::runtime::Runtime;
-
+use std::process::Command;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -18,7 +15,7 @@ async fn main() -> io::Result<()> {
     }
 
     let port = args[1].parse::<u16>().expect("Invalid port number");
-    let root_folder = Path::new(&args[2]).to_path_buf();
+    let root_folder = PathBuf::from(&args[2]);
 
     // Print startup information
     println!("Root folder: {}", root_folder.display());
@@ -30,125 +27,102 @@ async fn main() -> io::Result<()> {
         let stream = stream?;
         let root_folder = root_folder.clone();
         tokio::spawn(async move {
-            handle_connection(stream, root_folder).await.unwrap();
+            if let Err(e) = handle_connection(stream, root_folder).await {
+                eprintln!("Error handling connection: {}", e);
+            }
         });
     }
-
     Ok(())
 }
 
 async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
-    // Read HTTP request
+    // Read the request
     let mut buffer = [0; 1024];
     stream.read(&mut buffer)?;
 
-    // Parse HTTP request
+    // Convert the request buffer to a string
     let request = String::from_utf8_lossy(&buffer[..]);
-    let mut lines = request.lines();
-    if let Some(request_line) = lines.next() {
-        let mut parts = request_line.split_whitespace();
-        let method = parts.next().unwrap_or("");
-        let path = parts.next().unwrap_or("");
-        let _version = parts.next().unwrap_or(""); // HTTP version (not used)
+    
+    // Parse the request to get method and path
+    let (method, path) = parse_request(&request);
 
-        // Normalize path to avoid directory traversal
-        let requested_path = Path::new(&path);
-        let full_path = root_folder.join(requested_path.strip_prefix("/").unwrap_or(requested_path));
+    // Prepare full file path
+    let full_path = root_folder.join(&path[1..]);
 
-        // Log the request
-        let request_source = stream.peer_addr().unwrap().ip();
-        println!("{} {} ->", method, path);
-
-        match method {
+    // Generate response based on method and path
+    let response = if path.starts_with("/..") || path.starts_with("/forbidden") {
+        // Forbidden paths
+        format!("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n<html>403 Forbidden</html>")
+    } else if path.starts_with("/scripts/") {
+        // Handle scripts execution
+        match method.as_str() {
+            "GET" | "POST" => {
+                if full_path.is_file() {
+                    execute_script(&full_path, &method, &request).await.unwrap_or_else(|_| {
+                        format!("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>")
+                    })
+                } else {
+                    format!("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>")
+                }
+            }
+            _ => format!("HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n<html>405 Method Not Allowed</html>")
+        }
+    } else {
+        // Serve static files
+        match method.as_str() {
             "GET" => {
-                handle_get_request(&mut stream, &full_path).await?;
+                if full_path.is_file() {
+                    serve_file(&full_path).await.unwrap_or_else(|_| {
+                        format!("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>")
+                    })
+                } else {
+                    format!("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>")
+                }
             }
-            "POST" => {
-                handle_post_request(&mut stream, &full_path).await?;
-            }
-            _ => {
-                // Unsupported method
-                let response = "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n";
-                stream.write_all(response.as_bytes())?;
+            _ => format!("HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n<html>405 Method Not Allowed</html>")
+        }
+    };
+
+    // Write the response to the client
+    stream.write_all(response.as_bytes())?;
+    stream.flush()?;
+
+    Ok(())
+}
+
+fn parse_request(request: &str) -> (String, String) {
+    let mut method = String::new();
+    let mut path = String::new();
+
+    if let Some(first_line_end) = request.find("\r\n") {
+        if let Some(space_idx) = request.find(' ') {
+            method = request[0..space_idx].to_string();
+            if let Some(path_end_idx) = request[space_idx + 1..].find(' ') {
+                path = request[space_idx + 1..space_idx + 1 + path_end_idx].to_string();
             }
         }
     }
 
-    Ok(())
+    (method, path)
 }
 
-async fn handle_get_request(stream: &mut TcpStream, full_path: &Path) -> io::Result<()> {
-    // Check if file exists
-    if full_path.is_file() {
-        // Determine content type based on file extension
-        let content_type = determine_content_type(&full_path);
-        let file_content = fs::read(&full_path)?;
-
-        // Respond with file contents
-        let response = format!(
-            "HTTP/1.1 127.0.0.1 {} 200 (OK)", content_type
-            // "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            // content_type,
-            // file_content.len()
-        );
-        stream.write_all(response.as_bytes())?;
-        stream.write_all(&file_content)?;
+async fn execute_script(script_path: &Path, method: &str, request: &str) -> io::Result<String> {
+    let output = if method == "GET" {
+        Command::new(script_path)
+            .output()?
     } else {
-        // File not found
-        let response = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
-        stream.write_all(response.as_bytes())?;
-    }
+        let body = request.split("\r\n\r\n").last().unwrap_or("");
+        Command::new(script_path)
+            .arg(body)
+            .output()?
+    };
 
-    Ok(())
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-async fn handle_post_request(stream: &mut TcpStream, script_path: &Path) -> io::Result<()> {
-    // Check if script file exists
-    if script_path.is_file() {
-        // Execute the script
-        let output = Command::new(script_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await?;
+async fn serve_file(file_path: &Path) -> io::Result<String> {
+    let content = fs::read(file_path)?;
+    let content_type = mime_guess::from_path(file_path).first_or_octet_stream().to_string();
 
-        // Handle script execution result
-        if output.status.success() {
-            // Script executed successfully
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{}",
-                stdout
-            );
-            stream.write_all(response.as_bytes())?;
-        } else {
-            // Script execution failed
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let response = format!(
-                "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n{}",
-                stderr
-            );
-            stream.write_all(response.as_bytes())?;
-        }
-    } else {
-        // Script not found
-        let response = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
-        stream.write_all(response.as_bytes())?;
-    }
-
-    Ok(())
-}
-
-fn determine_content_type(file_path: &Path) -> &'static str {
-    match file_path.extension().and_then(|ext| ext.to_str()) {
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("html") => "text/html; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("js") => "text/javascript; charset=utf-8",
-        Some("jpg") => "image/jpeg",
-        Some("jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        Some("zip") => "application/zip",
-        _ => "application/octet-stream",
-    }
+    Ok(format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", content_type, content.len()) + &String::from_utf8_lossy(&content))
 }
