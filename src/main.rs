@@ -1,14 +1,15 @@
 use std::env;
 use std::fs;
-use std::io::Read;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use tokio::process::Command;
+use std::process::Stdio;
+use tokio::runtime::Runtime;
 
 
-
-fn main() -> io::Result<()> {
+#[tokio::main]
+async fn main() -> io::Result<()> {
     // Parse command-line arguments
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
@@ -16,8 +17,8 @@ fn main() -> io::Result<()> {
         std::process::exit(1);
     }
 
-        let port = args[1].parse::<u16>().expect("Invalid port number");
-        let root_folder = Path::new(&args[2]).to_path_buf();
+    let port = args[1].parse::<u16>().expect("Invalid port number");
+    let root_folder = Path::new(&args[2]).to_path_buf();
 
     // Print startup information
     println!("Root folder: {}", root_folder.display());
@@ -27,19 +28,23 @@ fn main() -> io::Result<()> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))?;
     for stream in listener.incoming() {
         let stream = stream?;
-        handle_connection(stream, root_folder.clone())?;
+        let root_folder = root_folder.clone();
+        tokio::spawn(async move {
+            handle_connection(stream, root_folder).await.unwrap();
+        });
     }
 
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
+async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
     // Read HTTP request
-    let mut buffer = String::new();
-    stream.read_to_string(&mut buffer)?;
+    let mut buffer = [0; 1024];
+    stream.read(&mut buffer)?;
 
     // Parse HTTP request
-    let mut lines = buffer.lines();
+    let request = String::from_utf8_lossy(&buffer[..]);
+    let mut lines = request.lines();
     if let Some(request_line) = lines.next() {
         let mut parts = request_line.split_whitespace();
         let method = parts.next().unwrap_or("");
@@ -56,14 +61,14 @@ fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<
 
         match method {
             "GET" => {
-                handle_get_request(&mut stream, &full_path)?;
+                handle_get_request(&mut stream, &full_path).await?;
             }
             "POST" => {
-                handle_post_request(&mut stream, &full_path)?;
+                handle_post_request(&mut stream, &full_path).await?;
             }
             _ => {
                 // Unsupported method
-                let response = format!("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
+                let response = "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n";
                 stream.write_all(response.as_bytes())?;
             }
         }
@@ -72,44 +77,46 @@ fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<
     Ok(())
 }
 
-fn handle_get_request(stream: &mut TcpStream, full_path: &Path) -> io::Result<()> {
+async fn handle_get_request(stream: &mut TcpStream, full_path: &Path) -> io::Result<()> {
     // Check if file exists
     if full_path.is_file() {
         // Determine content type based on file extension
         let content_type = determine_content_type(&full_path);
-        let file_content = fs::read_to_string(&full_path)?;
+        let file_content = fs::read(&full_path)?;
 
         // Respond with file contents
         let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-type: {}\r\nConnection: closed\r\n\r\n{}",
-            content_type, file_content
+            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            content_type,
+            file_content.len()
         );
         stream.write_all(response.as_bytes())?;
+        stream.write_all(&file_content)?;
     } else {
         // File not found
-        let response = "HTTP/1.1 404 Not Found\r\nConnection: closed\r\n\r\n";
+        let response = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
         stream.write_all(response.as_bytes())?;
     }
 
     Ok(())
 }
 
-fn handle_post_request(stream: &mut TcpStream, script_path: &Path) -> io::Result<()> {
+async fn handle_post_request(stream: &mut TcpStream, script_path: &Path) -> io::Result<()> {
     // Check if script file exists
     if script_path.is_file() {
         // Execute the script
         let output = Command::new(script_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()?
-            .wait_with_output()?;
+            .output()
+            .await?;
 
         // Handle script execution result
         if output.status.success() {
             // Script executed successfully
             let stdout = String::from_utf8_lossy(&output.stdout);
             let response = format!(
-                "HTTP/1.1 200 OK\r\nConnection: closed\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{}",
                 stdout
             );
             stream.write_all(response.as_bytes())?;
@@ -117,14 +124,14 @@ fn handle_post_request(stream: &mut TcpStream, script_path: &Path) -> io::Result
             // Script execution failed
             let stderr = String::from_utf8_lossy(&output.stderr);
             let response = format!(
-                "HTTP/1.1 500 Internal Server Error\r\nConnection: closed\r\n\r\n{}",
+                "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n{}",
                 stderr
             );
             stream.write_all(response.as_bytes())?;
         }
     } else {
         // Script not found
-        let response = "HTTP/1.1 404 Not Found\r\nConnection: closed\r\n\r\n";
+        let response = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
         stream.write_all(response.as_bytes())?;
     }
 
