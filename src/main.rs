@@ -60,7 +60,7 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
             // Check if the path contains a query string
             let query = if let Some(index) = path.find('?') {
                 let query = path.split_off(index + 1);
-                path.pop(); // Remove the '?' from the end of path
+                path.pop();
                 Some(query)
             } else {
                 None
@@ -120,14 +120,14 @@ async fn handle_get_request(
         // Read the file contents
         let contents = fs::read(&full_path)?;
 
-        // Determine the MIME type of the file
-        let mime_type = determine_content_type(&full_path);
+        // Determine the content type of the file
+        let content_type = determine_content_type(&full_path);
 
         // Construct the HTTP response
         println!("GET 127.0.0.1 {} -> 200 (OK)", path);
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            mime_type,
+            content_type,
             contents.len(),
         );
         
@@ -172,7 +172,6 @@ async fn execute_script(
             }
         }
 
-        // Additional environment variables required by the script
         cmd.env("Method", method);
         cmd.env("Path", path);
 
