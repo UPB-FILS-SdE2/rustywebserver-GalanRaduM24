@@ -249,6 +249,10 @@ async fn handle_post_request(
             cmd.env("QUERY_STRING", query);
         }
 
+        // Additional environment variables required by the script
+        cmd.env("Method", "POST");
+        cmd.env("Path", path);
+
         // Execute script
         let output = cmd
             .stdin(Stdio::piped())
