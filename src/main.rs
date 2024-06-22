@@ -271,6 +271,7 @@ async fn handle_post_request(
         cmd.env("Method", "POST");
         cmd.env("Path", path);
 
+
         // Execute script
         let mut child = cmd
             .stdin(Stdio::piped())
@@ -281,14 +282,14 @@ async fn handle_post_request(
 
         if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(body.as_bytes()).await?;
+            // Explicitly drop stdin to close it and signal end of input
+            drop(stdin);
         }
 
         let output = child
             .wait_with_output()
             .await
             .expect("Failed to read stdout");
-
-
         if output.status.success() {
             // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
