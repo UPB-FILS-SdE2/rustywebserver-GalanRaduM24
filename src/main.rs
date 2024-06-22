@@ -255,20 +255,17 @@ async fn handle_post_request(
     if full_path.is_file() {
         let mut cmd = Command::new(&full_path);
 
-        // Extract request body to pass as input to the script
+        // Extract request body to pass as input to script
         let body = extract_request_body(request);
-
-        // Extract headers from the request
-        let headers = extract_headers(request);
-
-        // Set headers as environment variables
-        for (key, value) in &headers {
-            cmd.env(key, value);
-        }
 
         // Set query parameters as environment variables
         if let Some(query) = extract_query_string(request) {
-            cmd.env("QUERY_STRING", query);
+            for (key, value) in query.split('&').map(|pair| {
+                let mut split = pair.split('=');
+                (split.next().unwrap_or(""), split.next().unwrap_or(""))
+            }) {
+                cmd.env(format!("Query_{}", key), value);
+            }
         }
 
         // Additional environment variables required by the script
@@ -283,8 +280,8 @@ async fn handle_post_request(
             .spawn()
             .expect("Failed to execute script");
 
-        // Pass the body to the script's stdin
-        if let Some(mut stdin) = child.stdin.take() {
+        // Write request body to the script's stdin
+        if let Some(stdin) = child.stdin.as_mut() {
             stdin.write_all(body.as_bytes()).await?;
         }
 
@@ -318,33 +315,19 @@ async fn handle_post_request(
             );
 
             // Write the response to the stream
-            stream.write_all(response.as_bytes())?;
+            stream.write_all(response.as_bytes()).await?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
             let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-            stream.write_all(response)?;
+            stream.write_all(response).await?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
         let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
-        stream.write_all(response)?;
+        stream.write_all(response).await?;
     }
 
     Ok(())
-}
-
-// Function to extract headers from the HTTP request
-fn extract_headers(request: &str) -> Vec<(String, String)> {
-    let mut headers = Vec::new();
-    for line in request.lines().skip(1) {
-        if line.is_empty() {
-            break;
-        }
-        if let Some((key, value)) = parse_header_line(line) {
-            headers.push((key, value));
-        }
-    }
-    headers
 }
 
 // Function to extract request body from the HTTP request
