@@ -275,7 +275,7 @@ async fn handle_post_request(
             .expect("Failed to execute script");
 
         // // Pass the request body to the child process's stdin
-        if !body.is_empty() {
+        if body.is_empty() {
             if let Some(mut stdin) = child.stdin.take() {
                 stdin.write_all(body.as_bytes()).await?;
             }
