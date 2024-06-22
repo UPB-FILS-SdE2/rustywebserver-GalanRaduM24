@@ -267,23 +267,16 @@ async fn handle_post_request(
         cmd.env("Method", "POST");
         cmd.env("Path", path);
 
-        let mut child = cmd
+        // Execute script
+        let output = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script");
-
-        // Pass the request body to the child process's stdin
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(body.as_bytes()).await?;
-        }
-
-        // Wait for the child process to complete and capture its output
-        let output = child
+            .expect("Failed to execute script")
             .wait_with_output()
             .await
-            .expect("Failed to wait for child process");
+            .expect("Failed to read stdout");
 
         if output.status.success() {
             // Parse the output and headers from the script
