@@ -295,7 +295,7 @@ async fn handle_post_request(
                 .unwrap_or_else(|| body.len().to_string());
 
             println!("POST 127.0.0.1 {} -> 200 (OK)", path);
-
+            println !("Headers: {:?}", headers);
             // Construct the HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
