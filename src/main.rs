@@ -26,8 +26,10 @@ async fn main() -> io::Result<()> {
     // Start server
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))?;
     loop {
+        // Accept incoming connections
         let (stream, _) = listener.accept()?;
         let root_folder = root_folder.clone();
+        // Handle each connection in a separate task
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream, root_folder).await {
                 eprintln!("Error handling connection: {}", e);
@@ -36,7 +38,7 @@ async fn main() -> io::Result<()> {
     }
 }
 
-
+// Function to handle incoming connections
 async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
     // Read HTTP request
     let mut buffer = [0; 1024];
@@ -46,7 +48,6 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
 
     // Parse the HTTP request
     let (method, path, query) = {
-        // Split request lines
         let lines: Vec<&str> = request.lines().collect();
         if lines.is_empty() {
             ("".to_string(), "".to_string(), None)
@@ -55,7 +56,7 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
             let mut parts = lines[0].split_whitespace();
             let method = parts.next().unwrap_or("").to_string();
             let mut path = parts.next().unwrap_or("").to_string();
-            let _http_version = parts.next().unwrap_or(""); // Not used
+            let _http_version = parts.next().unwrap_or("");
 
             // Check if the path contains a query string
             let query = if let Some(index) = path.find('?') {
@@ -72,9 +73,10 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
 
     // Delegate to the appropriate handler based on the HTTP method
     match method.as_str() {
-        "GET" => handle_get_request( &mut stream, &root_folder, &path, query).await,
+        "GET" => handle_get_request(&mut stream, &root_folder, &path, query).await,
         "POST" => handle_post_request(&mut stream, &root_folder, &path, &request).await,
         _ => {
+            // Handle unsupported HTTP methods
             println!("{} 127.0.0.1 {} -> 405 (Method Not Allowed)", method, path);
             let response = b"HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n<html>405 Method Not Allowed</html>";
             stream.write_all(response)?;
@@ -172,9 +174,11 @@ async fn execute_script(
             }
         }
 
+        // Set additional environment variables for the script
         cmd.env("Method", method);
         cmd.env("Path", path);
 
+        // Execute the script and capture the output
         let output = if method == "GET" {
             cmd.stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -182,11 +186,11 @@ async fn execute_script(
                 .await
                 .expect("Failed to execute script")
         } else {
-
             unimplemented!("Handle non-GET method body handling here");
         };
 
         if output.status.success() {
+            // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
@@ -199,6 +203,7 @@ async fn execute_script(
 
             println!("{} 127.0.0.1 {} -> 200 (OK)", method, path);
 
+            // Construct the HTTP response
             Ok(format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
@@ -213,6 +218,7 @@ async fn execute_script(
     }
 }
 
+// Determine the content type based on file extension
 fn determine_content_type(file_path: &Path) -> &'static str {
     match file_path.extension().and_then(|ext| ext.to_str()) {
         Some("txt") => "text/plain; charset=utf-8",
@@ -225,7 +231,6 @@ fn determine_content_type(file_path: &Path) -> &'static str {
         Some("zip") => "application/zip",
         _ => "application/octet-stream",
     }
-
 }
 
 // Asynchronous function to handle POST requests
@@ -264,6 +269,7 @@ async fn handle_post_request(
             .expect("Failed to read stdout");
 
         if output.status.success() {
+            // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
@@ -280,6 +286,7 @@ async fn handle_post_request(
 
             println!("POST 127.0.0.1 {} -> 200 (OK)", path);
 
+            // Construct the HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
