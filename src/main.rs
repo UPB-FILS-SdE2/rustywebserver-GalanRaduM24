@@ -253,77 +253,93 @@ async fn handle_post_request(
     let full_path = root_folder.join(&path[1..]);
 
     if full_path.is_file() {
-        let mut cmd = Command::new(&full_path);
+        match execute_post_script(&full_path, request, path).await {
+            Ok((headers, body)) => {
+                // Parse headers and body
+                let content_type = headers
+                    .iter()
+                    .find(|&&(ref k, _)| *k == "Content-Type")
+                    .map(|&(_, ref v)| v.clone())
+                    .unwrap_or_else(|| "text/plain".to_string());
+                let content_length = headers
+                    .iter()
+                    .find(|&&(ref k, _)| *k == "Content-Length")
+                    .map(|&(_, ref v)| v.clone())
+                    .unwrap_or_else(|| body.len().to_string());
 
-        // Extract request body to pass as input to script
-        let body = extract_request_body(request);
+                println!("POST 127.0.0.1 {} -> 200 (OK)", path);
 
-        // Set query parameters as environment variable
-        if let Some(query) = extract_query_string(request) {
-            cmd.env("QUERY_STRING", query);
-        }
+                // Construct the HTTP response
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    content_type, content_length, body
+                );
 
-        // Additional environment variables required by the script
-        cmd.env("Method", "POST");
-        cmd.env("Path", path);
-
-        let mut child = cmd
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("Failed to execute script");
-
-        // Pass the request body to the child process's stdin if it's a POST request
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(body.as_bytes()).await?;
-        }
-
-        let output = child
-            .wait_with_output()
-            .await
-            .expect("Failed to read stdout");
-
-        if output.status.success() {
-            // Parse the output and headers from the script
-            let output_str = String::from_utf8_lossy(&output.stdout);
-            let (headers, body_start_index) = parse_headers(&output_str);
-            let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
-            let content_type = headers
-                .iter()
-                .find(|&&(ref k, _)| *k == "Content-Type")
-                .map(|&(_, ref v)| v.clone())
-                .unwrap_or_else(|| "text/plain".to_string());
-            let content_length = headers
-                .iter()
-                .find(|&&(ref k, _)| *k == "Content-Length")
-                .map(|&(_, ref v)| v.clone())
-                .unwrap_or_else(|| body.len().to_string());
-
-            println!("POST 127.0.0.1 {} -> 200 (OK)", path);
-
-            // Construct the HTTP response
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                content_type, content_length, body
-            );
-
-            // Write the response to the stream
-            stream.write_all(response.as_bytes())?;
-        } else {
-            // Handle execution failure
-            println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
-            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-            stream.write_all(response)?;
+                // Write the response to the stream
+                stream.write_all(response.as_bytes())?;
+            }
+            Err(_) => {
+                println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
+                let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
+                stream.write_all(response)?;
+            }
         }
     } else {
-        // Handle file not found
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
         let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
         stream.write_all(response)?;
     }
 
     Ok(())
+}
+
+async fn execute_post_script(
+    script_path: &Path,
+    request: &str,
+    path: &str,
+) -> io::Result<(Vec<(String, String)>, String)> {
+    let mut cmd = Command::new(&script_path);
+
+    // Extract request body to pass as input to script
+    let body = extract_request_body(request);
+
+    // Set query parameters as environment variable
+    if let Some(query) = extract_query_string(request) {
+        cmd.env("QUERY_STRING", query);
+    }
+
+    // Additional environment variables required by the script
+    cmd.env("Method", "POST");
+    cmd.env("Path", path);
+
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute script");
+
+    // Pass the request body to the child process's stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(body.as_bytes()).await?;
+    }
+
+    // Wait for the child process to complete and capture its output
+    let output = child
+        .wait_with_output()
+        .await
+        .expect("Failed to wait for child process");
+
+    if output.status.success() {
+        // Parse the output and headers from the script
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let (headers, body_start_index) = parse_headers(&output_str);
+        let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+
+        Ok((headers, body))
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, "Script execution failed"))
+    }
 }
 
 // Function to extract request body from the HTTP request
