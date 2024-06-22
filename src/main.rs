@@ -254,54 +254,58 @@ async fn handle_post_request(
 
     if full_path.is_file() {
         let mut cmd = Command::new(&full_path);
-
+    
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
-
-        // Set query parameters as environment variable
+    
+        // Set query parameters as environment variables
         if let Some(query) = extract_query_string(request) {
             cmd.env("QUERY_STRING", query);
         }
-
+    
         // Additional environment variables required by the script
         cmd.env("Method", "POST");
         cmd.env("Path", path);
-
+    
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("Failed to execute script");
-
+    
+        // Pass the request body to the child process's stdin
         if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(body.as_bytes()).await?;
         }
-
+    
+        // Wait for the child process to complete and capture its output
         let output = child
             .wait_with_output()
             .await
-            .expect("Failed to read stdout");
-
+            .expect("Failed to wait for child process");
+    
         if output.status.success() {
-            // Parse the output and headers from the script
+            // Handle successful execution
+            // Parse headers and body from the output
             let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+    
+            // Determine content type and length from headers
             let content_type = headers
                 .iter()
                 .find(|&&(ref k, _)| *k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
+    
             let content_length = headers
                 .iter()
                 .find(|&&(ref k, _)| *k == "Content-Length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
-
-            println!("POST 127.0.0.1 {} -> 200 (OK)", path);
-
-            // Construct the HTTP response
+            
+            // Construct HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
