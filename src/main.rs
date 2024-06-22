@@ -258,9 +258,19 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variable
-        if let Some(query) = extract_query_string(request) {
-            cmd.env("QUERY_STRING", query);
+        // Set query parameters as environment variables
+        if let Some(query_string) = extract_query_string(request) {
+            let query_pairs = query_string.split('&').map(|pair| {
+                let mut split = pair.split('=');
+                (
+                    format!("Query_{}", split.next().unwrap_or("")),
+                    split.next().unwrap_or("").to_string(),
+                )
+            });
+
+            for (key, value) in query_pairs {
+                cmd.env(&key, &value);
+            }
         }
 
         // Additional environment variables required by the script
@@ -293,12 +303,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Type")
+                .find(|&&(ref k, _)| *k == "Content-type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Length")
+                .find(|&&(ref k, _)| *k == "Content-length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -308,19 +318,18 @@ async fn handle_post_request(
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
-            );
-
-            // Write the response to the stream
-            stream.write_all(response.as_bytes())?;
+            ).as_bytes().to_vec();
+            
+            stream.write_all(&response)?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
-            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-            stream.write_all(response)?;
+            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>".to_vec();
+            stream.write_all(&response)?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
-        let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
-        stream.write_all(response)?;
+        let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>".to_vec();
+        stream.write_all(&response)?;
     }
 
     Ok(())
