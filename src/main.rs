@@ -281,7 +281,9 @@ async fn handle_post_request(
             }
         }
         else if body.is_empty() {
-            print!("Body: {}", body);
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(body.as_bytes()).await?;
+            }
         }
 
         // Wait for the child process to complete and capture its output
