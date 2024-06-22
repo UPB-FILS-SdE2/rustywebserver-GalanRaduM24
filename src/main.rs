@@ -244,38 +244,6 @@ fn determine_content_type(file_path: &Path) -> &'static str {
     }
 }
 
-// Function to extract the request body from the HTTP request
-fn extract_request_body(request: &str) -> String {
-    if let Some(index) = request.find("\r\n\r\n") {
-        request[(index + 4)..].to_string()
-    } else {
-        String::new()
-    }
-}
-
-// Function to extract the query string from the HTTP request path
-fn extract_query_string(path: &str) -> Option<String> {
-    if let Some(index) = path.find('?') {
-        Some(path[(index + 1)..].to_string())
-    } else {
-        None
-    }
-}
-
-// Function to parse headers from the script's output
-fn parse_headers(output: &str) -> (Vec<(String, String)>, usize) {
-    let mut headers = Vec::new();
-    for (i, line) in output.lines().enumerate() {
-        if line.is_empty() {
-            return (headers, i + 1);
-        }
-        if let Some((key, value)) = line.split_once(':') {
-            headers.push((key.trim().to_string(), value.trim().to_string()));
-        }
-    }
-    (headers, output.lines().count())
-}
-
 async fn handle_post_request(
     stream: &mut TcpStream,
     root_folder: &PathBuf,
@@ -290,31 +258,22 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variables
-        if let Some(query) = extract_query_string(path) {
-            for param in query.split('&') {
-                if let Some((key, value)) = param.split_once('=') {
-                    cmd.env(format!("Query_{}", key), value);
-                }
-            }
+        // Set query parameters as environment variable
+        if let Some(query) = extract_query_string(request) {
+            cmd.env("QUERY_STRING", query);
         }
 
         // Additional environment variables required by the script
         cmd.env("Method", "POST");
         cmd.env("Path", path);
 
-        let mut child = cmd
+        // Execute script
+        let output = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script");
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(body.as_bytes()).await?;
-        }
-
-        let output = child
+            .expect("Failed to execute script")
             .wait_with_output()
             .await
             .expect("Failed to read stdout");
@@ -326,12 +285,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| k.eq_ignore_ascii_case("Content-Type"))
+                .find(|&&(ref k, _)| *k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| k.eq_ignore_ascii_case("Content-Length"))
+                .find(|&&(ref k, _)| *k == "Content-Length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -358,6 +317,62 @@ async fn handle_post_request(
 
     Ok(())
 }
+
+// Function to extract request body from the HTTP request
+fn extract_request_body(request: &str) -> String {
+    // Find the start of the body after headers
+    if let Some(start_index) = request.find("\r\n\r\n") {
+        let body_start = start_index + 4; // Skip "\r\n\r\n"
+        request[body_start..].to_string()
+    } else {
+        String::new()
+    }
+}
+
+// Function to extract query string from the HTTP request
+fn extract_query_string(request: &str) -> Option<&str> {
+    // Find the start of the request line
+    if let Some(start_index) = request.find("\r\n") {
+        let request_line = &request[..start_index];
+
+        // Find the start of the query string (after the method and path)
+        if let Some(path_index) = request_line.find(' ') {
+            if let Some(query_start) = request_line[path_index..].find('?') {
+                let query_start = path_index + query_start + 1; // Skip '?'
+                if let Some(query_end) = request_line[path_index + query_start..].find(' ') {
+                    return Some(&request_line[path_index + query_start..path_index + query_start + query_end]);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+// Function to parse headers from the script output
+fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
+    let mut headers = Vec::new();
+    let mut body_start_index = 0;
+
+    // Split the response into lines
+    let lines: Vec<&str> = response.lines().collect();
+
+    // Iterate over lines to parse headers
+    for (index, line) in lines.iter().enumerate() {
+        if line.is_empty() {
+            // Empty line indicates end of headers, body starts after this
+            body_start_index = index + 1;
+            break;
+        }
+
+        // Split each line into key-value pairs
+        if let Some((key, value)) = parse_header_line(line) {
+            headers.push((key, value));
+        }
+    }
+    (headers, body_start_index)
+}
+
 // Function to parse a single header line into key-value pair
 fn parse_header_line(line: &str) -> Option<(String, String)> {
     if let Some(separator_index) = line.find(':') {
