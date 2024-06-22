@@ -274,17 +274,16 @@ async fn handle_post_request(
             .spawn()
             .expect("Failed to execute script");
 
-        // // Pass the request body to the child process's stdin
-        if !body.is_empty() {
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(body.as_bytes()).await?;
-            }
+    // Optionally handle child stdin based on script requirements
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Err(e) = stdin.write_all(body.as_bytes()).await {
+            eprintln!("Failed to write to script stdin: {}", e);
+            // Handle error: close resources, log, and return appropriate error response
+            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
+            stream.write_all(response)?;
+            return Ok(());
         }
-        else if body.is_empty() {
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(body.as_bytes()).await?;
-            }
-        }
+    }
 
         // Wait for the child process to complete and capture its output
         let output = child
