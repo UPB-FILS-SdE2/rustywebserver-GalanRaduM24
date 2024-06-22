@@ -359,7 +359,6 @@ fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
             headers.push((key, value));
         }
     }
-
     (headers, body_start_index)
 }
 
