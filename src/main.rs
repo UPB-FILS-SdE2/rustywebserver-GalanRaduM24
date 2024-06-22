@@ -253,36 +253,61 @@ async fn handle_post_request(
     let full_path = root_folder.join(&path[1..]);
 
     if full_path.is_file() {
-        match execute_post_script(&full_path, request, path).await {
-            Ok((headers, body)) => {
-                // Parse headers and body
-                let content_type = headers
-                    .iter()
-                    .find(|&&(ref k, _)| *k == "Content-Type")
-                    .map(|&(_, ref v)| v.clone())
-                    .unwrap_or_else(|| "text/plain".to_string());
-                let content_length = headers
-                    .iter()
-                    .find(|&&(ref k, _)| *k == "Content-Length")
-                    .map(|&(_, ref v)| v.clone())
-                    .unwrap_or_else(|| body.len().to_string());
+        let mut cmd = Command::new(&full_path);
 
-                println!("POST 127.0.0.1 {} -> 200 (OK)", path);
+        // Extract request body to pass as input to script
+        let body = extract_request_body(request);
 
-                // Construct the HTTP response
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    content_type, content_length, body
-                );
+        // Set query parameters as environment variable
+        if let Some(query) = extract_query_string(request) {
+            cmd.env("QUERY_STRING", query);
+        }
 
-                // Write the response to the stream
-                stream.write_all(response.as_bytes())?;
-            }
-            Err(_) => {
-                println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
-                let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-                stream.write_all(response)?;
-            }
+        // Additional environment variables required by the script
+        cmd.env("Method", "POST");
+        cmd.env("Path", path);
+
+        // Execute script
+        let output = cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute script")
+            .wait_with_output()
+            .await
+            .expect("Failed to read stdout");
+
+        if output.status.success() {
+            // Parse the output and headers from the script
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            let (headers, body_start_index) = parse_headers(&output_str);
+            let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+            let content_type = headers
+                .iter()
+                .find(|&&(ref k, _)| *k == "Content-Type")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| "text/plain".to_string());
+            let content_length = headers
+                .iter()
+                .find(|&&(ref k, _)| *k == "Content-Length")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| body.len().to_string());
+
+            println!("POST 127.0.0.1 {} -> 200 (OK)", path);
+
+            // Construct the HTTP response
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                content_type, content_length, body
+            );
+
+            // Write the response to the stream
+            stream.write_all(response.as_bytes())?;
+        } else {
+            println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
+            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
+            stream.write_all(response)?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
@@ -291,55 +316,6 @@ async fn handle_post_request(
     }
 
     Ok(())
-}
-
-async fn execute_post_script(
-    script_path: &Path,
-    request: &str,
-    path: &str,
-) -> io::Result<(Vec<(String, String)>, String)> {
-    let mut cmd = Command::new(&script_path);
-
-    // Extract request body to pass as input to script
-    let body = extract_request_body(request);
-
-    // Set query parameters as environment variable
-    if let Some(query) = extract_query_string(request) {
-        cmd.env("QUERY_STRING", query);
-    }
-
-    // Additional environment variables required by the script
-    cmd.env("Method", "POST");
-    cmd.env("Path", path);
-
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute script");
-
-    // Pass the request body to the child process's stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(body.as_bytes()).await?;
-    }
-
-    // Wait for the child process to complete and capture its output
-    let output = child
-        .wait_with_output()
-        .await
-        .expect("Failed to wait for child process");
-
-    if output.status.success() {
-        // Parse the output and headers from the script
-        let output_str = String::from_utf8_lossy(&output.stdout);
-        let (headers, body_start_index) = parse_headers(&output_str);
-        let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
-
-        Ok((headers, body))
-    } else {
-        Err(io::Error::new(io::ErrorKind::Other, "Script execution failed"))
-    }
 }
 
 // Function to extract request body from the HTTP request
@@ -354,7 +330,7 @@ fn extract_request_body(request: &str) -> String {
 }
 
 // Function to extract query string from the HTTP request
-fn extract_query_string(request: &str) -> Option<String> {
+fn extract_query_string(request: &str) -> Option<&str> {
     // Find the start of the request line
     if let Some(start_index) = request.find("\r\n") {
         let request_line = &request[..start_index];
@@ -364,7 +340,7 @@ fn extract_query_string(request: &str) -> Option<String> {
             if let Some(query_start) = request_line[path_index..].find('?') {
                 let query_start = path_index + query_start + 1; // Skip '?'
                 if let Some(query_end) = request_line[path_index + query_start..].find(' ') {
-                    return Some(request_line[path_index + query_start..path_index + query_start + query_end].to_string());
+                    return Some(&request_line[path_index + query_start..path_index + query_start + query_end]);
                 }
             }
         }
