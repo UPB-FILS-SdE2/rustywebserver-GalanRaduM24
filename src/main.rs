@@ -81,7 +81,7 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
 
     // Delegate to the appropriate handler based on the HTTP method
     match method.as_str() {
-        "GET" => handle_get_request( &mut stream, &root_folder, &path, query, &headers).await, // Pass headers
+        "GET" => handle_get_request( &mut stream, &root_folder, &path, query, &headers).await, 
         "POST" => handle_post_request(&mut stream, &root_folder, &path, &request).await,
         _ => {
             println!("{} 127.0.0.1 {} -> 405 (Method Not Allowed)", method, path);
@@ -244,7 +244,6 @@ fn determine_content_type(file_path: &Path) -> &'static str {
     }
 }
 
-// Asynchronous function to handle POST requests
 async fn handle_post_request(
     stream: &mut TcpStream,
     root_folder: &PathBuf,
@@ -301,18 +300,19 @@ async fn handle_post_request(
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
-            ).as_bytes().to_vec();
-            
-            stream.write_all(&response)?;
+            );
+
+            // Write the response to the stream
+            stream.write_all(response.as_bytes())?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
-            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>".to_vec();
-            stream.write_all(&response)?;
+            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
+            stream.write_all(response)?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
-        let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>".to_vec();
-        stream.write_all(&response)?;
+        let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
+        stream.write_all(response)?;
     }
 
     Ok(())
