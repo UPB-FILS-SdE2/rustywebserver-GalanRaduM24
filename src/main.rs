@@ -258,6 +258,8 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
+        println!("Request body: {}", body);
+
         // Set query parameters as environment variable
         if let Some(query) = extract_query_string(request) {
             cmd.env("QUERY_STRING", query);
@@ -283,11 +285,15 @@ async fn handle_post_request(
             .await
             .expect("Failed to read stdout");
 
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        println!("Script output: {}", output_str);
+
         if output.status.success() {
             // Parse the output and headers from the script
-            let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+            println!("Response body: {}", body);
+            
             let content_type = headers
                 .iter()
                 .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
@@ -322,7 +328,6 @@ async fn handle_post_request(
 
     Ok(())
 }
-
 
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
