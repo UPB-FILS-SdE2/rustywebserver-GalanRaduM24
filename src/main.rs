@@ -267,18 +267,13 @@ async fn handle_post_request(
         cmd.env("Method", "POST");
         cmd.env("Path", path);
 
-        let mut child = cmd
+        // Execute script
+        let output = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script");
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(body.as_bytes()).await?;
-        }
-
-        let output = child
+            .expect("Failed to execute script")
             .wait_with_output()
             .await
             .expect("Failed to read stdout");
@@ -290,12 +285,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
+                .find(|&&(ref k, _)| *k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| k.to_lowercase() == "content-length")
+                .find(|&&(ref k, _)| *k == "Content-Length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -322,7 +317,6 @@ async fn handle_post_request(
 
     Ok(())
 }
-
 
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
@@ -389,4 +383,3 @@ fn parse_header_line(line: &str) -> Option<(String, String)> {
         None
     }
 }
-
