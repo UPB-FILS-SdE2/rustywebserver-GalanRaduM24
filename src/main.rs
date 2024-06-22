@@ -324,12 +324,10 @@ async fn handle_post_request(
 }
 
 
-// Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
-    // Find the start of the body after headers
-    if let Some(start_index) = request.find("\r\n\r\n") {
-        let body_start = start_index + 4; // Skip "\r\n\r\n"
-        request[body_start..].to_string()
+    let parts: Vec<&str> = request.split("\r\n\r\n").collect();
+    if parts.len() > 1 {
+        parts[1..].join("\r\n\r\n")
     } else {
         String::new()
     }
