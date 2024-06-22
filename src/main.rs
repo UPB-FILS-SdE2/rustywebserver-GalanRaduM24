@@ -268,12 +268,20 @@ async fn handle_post_request(
         cmd.env("Path", path);
 
         // Execute script
-        let output = cmd
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script")
+            .expect("Failed to execute script");
+
+        // Write the request body to the script's stdin
+        if let Some(stdin) = &mut child.stdin {
+            stdin.write_all(body.as_bytes()).await.expect("Failed to write to stdin");
+        }
+
+        // Wait for the script to complete and capture its output
+        let output = child
             .wait_with_output()
             .await
             .expect("Failed to read stdout");
@@ -285,12 +293,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Type")
+                .find(|&&(ref k, _)| *k == "Content-type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Length")
+                .find(|&&(ref k, _)| *k == "Content-length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -300,19 +308,18 @@ async fn handle_post_request(
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
-            );
-
-            // Write the response to the stream
-            stream.write_all(response.as_bytes())?;
+            ).as_bytes().to_vec();
+            
+            stream.write_all(&response)?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
-            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-            stream.write_all(response)?;
+            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>".to_vec();
+            stream.write_all(&response)?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
-        let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
-        stream.write_all(response)?;
+        let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>".to_vec();
+        stream.write_all(&response)?;
     }
 
     Ok(())
