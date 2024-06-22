@@ -258,8 +258,6 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        println!("Request body: {}", body);
-
         // Set query parameters as environment variable
         if let Some(query) = extract_query_string(request) {
             cmd.env("QUERY_STRING", query);
@@ -285,15 +283,11 @@ async fn handle_post_request(
             .await
             .expect("Failed to read stdout");
 
-        let output_str = String::from_utf8_lossy(&output.stdout);
-        println!("Script output: {}", output_str);
-
         if output.status.success() {
             // Parse the output and headers from the script
+            let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
-            println!("Response body: {}", body);
-            
             let content_type = headers
                 .iter()
                 .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
@@ -329,11 +323,16 @@ async fn handle_post_request(
     Ok(())
 }
 
+
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
-    let mut headers_body_split = request.split("\r\n\r\n");
-    headers_body_split.next(); // Skip headers
-    headers_body_split.next().unwrap_or("").to_string() // Get body
+    // Find the start of the body after headers
+    if let Some(start_index) = request.find("\r\n\r\n") {
+        let body_start = start_index + 4; // Skip "\r\n\r\n"
+        request[body_start..].to_string()
+    } else {
+        String::new()
+    }
 }
 
 // Function to extract query string from the HTTP request
@@ -359,19 +358,24 @@ fn extract_query_string(request: &str) -> Option<&str> {
 // Function to parse headers from the script output
 fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
-    let mut lines = response.lines();
     let mut body_start_index = 0;
 
-    for (i, line) in lines.by_ref().enumerate() {
+    // Split the response into lines
+    let lines: Vec<&str> = response.lines().collect();
+
+    // Iterate over lines to parse headers
+    for (index, line) in lines.iter().enumerate() {
         if line.is_empty() {
-            body_start_index = i + 1;
+            // Empty line indicates end of headers, body starts after this
+            body_start_index = index + 1;
             break;
         }
-        if let Some((key, value)) = line.split_once(": ") {
-            headers.push((key.to_string(), value.to_string()));
+
+        // Split each line into key-value pairs
+        if let Some((key, value)) = parse_header_line(line) {
+            headers.push((key, value));
         }
     }
-    
     (headers, body_start_index)
 }
 
