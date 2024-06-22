@@ -258,14 +258,9 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variables
+        // Set query parameters as environment variable
         if let Some(query) = extract_query_string(request) {
-            for (key, value) in query.split('&').map(|pair| {
-                let mut split = pair.split('=');
-                (split.next().unwrap_or(""), split.next().unwrap_or(""))
-            }) {
-                cmd.env(format!("Query_{}", key), value);
-            }
+            cmd.env("QUERY_STRING", query);
         }
 
         // Additional environment variables required by the script
@@ -273,19 +268,12 @@ async fn handle_post_request(
         cmd.env("Path", path);
 
         // Execute script
-        let mut child = cmd
+        let output = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script");
-
-        // Write request body to the script's stdin
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(body.as_bytes()).await?;
-        }
-
-        let output = child
+            .expect("Failed to execute script")
             .wait_with_output()
             .await
             .expect("Failed to read stdout");
