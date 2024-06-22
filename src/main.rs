@@ -303,7 +303,7 @@ async fn handle_post_request(
             // Construct the HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                content_type, content_length, body
+                content_type, body.len(), body
             );
 
             // Write the response to the stream
