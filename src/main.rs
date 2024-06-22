@@ -260,7 +260,10 @@ async fn handle_post_request(
 
         // Set query parameters as environment variable
         if let Some(query) = extract_query_string(request) {
-            cmd.env("QUERY_STRING", query);
+            let query_params = parse_query_string(&query);
+            for (key, value) in query_params {
+                cmd.env(format!("Query_{}", key), value);
+            }
         }
 
         // Additional environment variables required by the script
@@ -284,40 +287,30 @@ async fn handle_post_request(
             .expect("Failed to read stdout");
 
         if output.status.success() {
+            // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
-            let mut headers = vec![];
-            let mut body = String::new();
-            let mut in_body = false;
-
-            for line in output_str.lines() {
-                if line.trim().is_empty() {
-                    in_body = true;
-                    continue;
-                }
-                if in_body {
-                    body.push_str(line);
-                    body.push('\n');
-                } else {
-                    headers.push(line.to_string());
-                }
-            }
-
-            if !body.is_empty() {
-                body.pop(); // Remove the last newline character
-            }
-
-            let content_type = headers.iter()
-                .find(|h| h.to_lowercase().starts_with("content-type:"))
-                .map(|h| h.split(":").nth(1).unwrap_or("text/plain").trim())
-                .unwrap_or("text/plain");
+            let (headers, body_start_index) = parse_headers(&output_str);
+            let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+            let content_type = headers
+                .iter()
+                .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| "text/plain".to_string());
+            let content_length = headers
+                .iter()
+                .find(|&&(ref k, _)| k.to_lowercase() == "content-length")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| body.len().to_string());
 
             println!("POST 127.0.0.1 {} -> 200 (OK)", path);
 
+            // Construct the HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                content_type, body.len(), body
+                content_type, content_length, body
             );
 
+            // Write the response to the stream
             stream.write_all(response.as_bytes())?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
@@ -333,56 +326,54 @@ async fn handle_post_request(
     Ok(())
 }
 
-
-// Function to extract request body from the HTTP request
+// Helper function to extract the request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
-    // Find the start of the body after headers
-    if let Some(start_index) = request.find("\r\n\r\n") {
-        let body_start = start_index + 4; // Skip "\r\n\r\n"
-        request[body_start..].to_string()
+    let parts: Vec<&str> = request.split("\r\n\r\n").collect();
+    if parts.len() > 1 {
+        parts[1].to_string()
     } else {
         String::new()
     }
 }
 
-// Function to extract query string from the HTTP request
-fn extract_query_string(request: &str) -> Option<&str> {
-    // Find the start of the request line
-    if let Some(start_index) = request.find("\r\n") {
-        let request_line = &request[..start_index];
-
-        // Find the start of the query string (after the method and path)
-        if let Some(path_index) = request_line.find(' ') {
-            if let Some(query_start) = request_line[path_index..].find('?') {
-                let query_start = path_index + query_start + 1; // Skip '?'
-                if let Some(query_end) = request_line[path_index + query_start..].find(' ') {
-                    return Some(&request_line[path_index + query_start..path_index + query_start + query_end]);
-                }
-            }
+// Helper function to extract the query string from the HTTP request
+fn extract_query_string(request: &str) -> Option<String> {
+    let parts: Vec<&str> = request.split(" ").collect();
+    if parts.len() > 1 {
+        let path_and_query: Vec<&str> = parts[1].split("?").collect();
+        if path_and_query.len() > 1 {
+            return Some(path_and_query[1].to_string());
         }
     }
-
     None
 }
 
-// Function to parse headers from the script output
-fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
+// Helper function to parse query string into key-value pairs
+fn parse_query_string(query: &str) -> Vec<(String, String)> {
+    query
+        .split('&')
+        .map(|pair| {
+            let mut kv = pair.split('=');
+            (
+                kv.next().unwrap_or("").to_string(),
+                kv.next().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+// Helper function to parse headers from script output
+fn parse_headers(output: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
     let mut body_start_index = 0;
-
-    // Split the response into lines
-    let lines: Vec<&str> = response.lines().collect();
-
-    // Iterate over lines to parse headers
-    for (index, line) in lines.iter().enumerate() {
+    for (i, line) in output.lines().enumerate() {
         if line.is_empty() {
-            // Empty line indicates end of headers, body starts after this
-            body_start_index = index + 1;
+            body_start_index = i + 1;
             break;
-        }
-
-        // Split each line into key-value pairs
-        if let Some((key, value)) = parse_header_line(line) {
+        } else {
+            let mut parts = line.splitn(2, ':');
+            let key = parts.next().unwrap_or("").trim().to_string();
+            let value = parts.next().unwrap_or("").trim().to_string();
             headers.push((key, value));
         }
     }
