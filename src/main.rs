@@ -280,6 +280,9 @@ async fn handle_post_request(
                 stdin.write_all(body.as_bytes()).await?;
             }
         }
+        else if !body.is_empty() {
+            print!("Body: {}", body);
+        }
 
         // Wait for the child process to complete and capture its output
         let output = child
