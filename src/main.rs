@@ -38,7 +38,6 @@ async fn main() -> io::Result<()> {
     }
 }
 
-// Function to handle incoming connections
 async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
     // Read HTTP request
     let mut buffer = [0; 1024];
@@ -47,16 +46,17 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
     let lines: Vec<&str> = request.lines().collect();
 
     // Parse the HTTP request
-    let (method, path, query) = {
+    let (method, path, query, headers) = {
+        // Split request lines
         let lines: Vec<&str> = request.lines().collect();
         if lines.is_empty() {
-            ("".to_string(), "".to_string(), None)
+            ("".to_string(), "".to_string(), None, vec![])
         } else {
             // Split the request line into method, path, and HTTP version
             let mut parts = lines[0].split_whitespace();
             let method = parts.next().unwrap_or("").to_string();
             let mut path = parts.next().unwrap_or("").to_string();
-            let _http_version = parts.next().unwrap_or("");
+            let _http_version = parts.next().unwrap_or(""); // Not used
 
             // Check if the path contains a query string
             let query = if let Some(index) = path.find('?') {
@@ -67,16 +67,23 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
                 None
             };
 
-            (method, path, query)
+            // Parse headers
+            let mut headers = vec![];
+            for line in lines.iter().skip(1) {
+                if let Some((key, value)) = parse_header_line(line) {
+                    headers.push((key, value));
+                }
+            }
+
+            (method, path, query, headers)
         }
     };
 
     // Delegate to the appropriate handler based on the HTTP method
     match method.as_str() {
-        "GET" => handle_get_request(&mut stream, &root_folder, &path, query).await,
+        "GET" => handle_get_request( &mut stream, &root_folder, &path, query, &headers).await, // Pass headers
         "POST" => handle_post_request(&mut stream, &root_folder, &path, &request).await,
         _ => {
-            // Handle unsupported HTTP methods
             println!("{} 127.0.0.1 {} -> 405 (Method Not Allowed)", method, path);
             let response = b"HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n<html>405 Method Not Allowed</html>";
             stream.write_all(response)?;
@@ -91,6 +98,7 @@ async fn handle_get_request(
     root_folder: &Path,
     path: &str,
     query: Option<String>,
+    headers: &[(String, String)], // Add headers parameter
 ) -> io::Result<()> {
     // Construct the full path to the requested file
     let full_path = root_folder.join(&path[1..]); // Remove the leading '/' from the path
@@ -105,7 +113,7 @@ async fn handle_get_request(
 
     // Handle scripts in the /scripts/ directory
     if path.starts_with("/scripts/") {
-        match execute_script(&full_path, &query, path, "GET", &request_headers).await {
+        match execute_script(&full_path, &query, path, "GET", headers).await { // Pass headers
             Ok(response) => stream.write_all(&response)?,
             Err(_) => {
                 println!("GET 127.0.0.1 {} -> 500 (Internal Server Error)", path);
@@ -154,7 +162,7 @@ async fn execute_script(
     query: &Option<String>,
     path: &str,
     method: &str,
-    headers: &[(String, String)],
+    headers: &[(String, String)], // Add headers parameter
 ) -> io::Result<Vec<u8>> {
     if script_path.is_file() {
         let mut cmd = Command::new(&script_path);
@@ -177,11 +185,9 @@ async fn execute_script(
 
         // Set environment variables from headers
         for (key, value) in headers {
-            let env_var = key.replace("-", "_");
-            cmd.env(env_var, value);
+            cmd.env(key, value);
         }
 
-        // Additional environment variables required by the script
         cmd.env("Method", method);
         cmd.env("Path", path);
 
@@ -192,7 +198,6 @@ async fn execute_script(
                 .await
                 .expect("Failed to execute script")
         } else {
-
             unimplemented!("Handle non-GET method body handling here");
         };
 
@@ -222,6 +227,7 @@ async fn execute_script(
         Ok(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>".to_vec())
     }
 }
+
 
 // Determine the content type based on file extension
 fn determine_content_type(file_path: &Path) -> &'static str {
