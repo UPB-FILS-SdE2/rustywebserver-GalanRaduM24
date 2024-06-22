@@ -292,7 +292,7 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Type")
+                .find(|&&(ref k, _)| *k == "Content-type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
