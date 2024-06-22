@@ -254,58 +254,56 @@ async fn handle_post_request(
 
     if full_path.is_file() {
         let mut cmd = Command::new(&full_path);
-    
+
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
-    
-        // Set query parameters as environment variables
+
+        // Set query parameters as environment variable
         if let Some(query) = extract_query_string(request) {
             cmd.env("QUERY_STRING", query);
         }
-    
+
         // Additional environment variables required by the script
         cmd.env("Method", "POST");
         cmd.env("Path", path);
-    
+
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("Failed to execute script");
-    
+
         // Pass the request body to the child process's stdin
         if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(body.as_bytes()).await?;
         }
-    
+
         // Wait for the child process to complete and capture its output
         let output = child
             .wait_with_output()
             .await
             .expect("Failed to wait for child process");
-    
+
         if output.status.success() {
-            // Handle successful execution
-            // Parse headers and body from the output
+            // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
-    
-            // Determine content type and length from headers
             let content_type = headers
                 .iter()
                 .find(|&&(ref k, _)| *k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
-    
             let content_length = headers
                 .iter()
                 .find(|&&(ref k, _)| *k == "Content-Length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
-            
-            // Construct HTTP response
+
+            println!("POST 127.0.0.1 {} -> 200 (OK)", path);
+
+            // Construct the HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
@@ -314,11 +312,13 @@ async fn handle_post_request(
             // Write the response to the stream
             stream.write_all(response.as_bytes())?;
         } else {
+            // Handle execution failure
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
             let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
             stream.write_all(response)?;
         }
     } else {
+        // Handle file not found
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
         let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
         stream.write_all(response)?;
@@ -326,7 +326,6 @@ async fn handle_post_request(
 
     Ok(())
 }
-
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
     // Find the start of the body after headers
@@ -339,7 +338,7 @@ fn extract_request_body(request: &str) -> String {
 }
 
 // Function to extract query string from the HTTP request
-fn extract_query_string(request: &str) -> Option<&str> {
+fn extract_query_string(request: &str) -> Option<String> {
     // Find the start of the request line
     if let Some(start_index) = request.find("\r\n") {
         let request_line = &request[..start_index];
@@ -349,7 +348,7 @@ fn extract_query_string(request: &str) -> Option<&str> {
             if let Some(query_start) = request_line[path_index..].find('?') {
                 let query_start = path_index + query_start + 1; // Skip '?'
                 if let Some(query_end) = request_line[path_index + query_start..].find(' ') {
-                    return Some(&request_line[path_index + query_start..path_index + query_start + query_end]);
+                    return Some(request_line[path_index + query_start..path_index + query_start + query_end].to_string());
                 }
             }
         }
