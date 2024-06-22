@@ -105,7 +105,7 @@ async fn handle_get_request(
 
     // Handle scripts in the /scripts/ directory
     if path.starts_with("/scripts/") {
-        match execute_script(&full_path, &query, path, "GET").await {
+        match execute_script(&full_path, &query, path, "GET", &request_headers).await {
             Ok(response) => stream.write_all(&response)?,
             Err(_) => {
                 println!("GET 127.0.0.1 {} -> 500 (Internal Server Error)", path);
@@ -154,6 +154,7 @@ async fn execute_script(
     query: &Option<String>,
     path: &str,
     method: &str,
+    headers: &[(String, String)],
 ) -> io::Result<Vec<u8>> {
     if script_path.is_file() {
         let mut cmd = Command::new(&script_path);
@@ -174,11 +175,16 @@ async fn execute_script(
             }
         }
 
-        // Set additional environment variables for the script
+        // Set environment variables from headers
+        for (key, value) in headers {
+            let env_var = key.replace("-", "_");
+            cmd.env(env_var, value);
+        }
+
+        // Additional environment variables required by the script
         cmd.env("Method", method);
         cmd.env("Path", path);
 
-        // Execute the script and capture the output
         let output = if method == "GET" {
             cmd.stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -186,11 +192,11 @@ async fn execute_script(
                 .await
                 .expect("Failed to execute script")
         } else {
+
             unimplemented!("Handle non-GET method body handling here");
         };
 
         if output.status.success() {
-            // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
@@ -203,7 +209,6 @@ async fn execute_script(
 
             println!("{} 127.0.0.1 {} -> 200 (OK)", method, path);
 
-            // Construct the HTTP response
             Ok(format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
