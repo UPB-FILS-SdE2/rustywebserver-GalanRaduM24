@@ -274,23 +274,15 @@ async fn handle_post_request(
             .spawn()
             .expect("Failed to execute script");
 
-    // Optionally handle child stdin based on script requirements
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = stdin.write_all(body.as_bytes()).await {
-            eprintln!("Failed to write to script stdin: {}", e);
-            // Handle error: close resources, log, and return appropriate error response
-            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-            stream.write_all(response)?;
-            return Ok(());
+        // Pass the request body to the child process's stdin if it's a POST request
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(body.as_bytes()).await?;
         }
-    }
 
-        // Wait for the child process to complete and capture its output
         let output = child
             .wait_with_output()
             .await
-            .expect("Failed to wait for child process");
-        
+            .expect("Failed to read stdout");
 
         if output.status.success() {
             // Parse the output and headers from the script
@@ -299,12 +291,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-type")
+                .find(|&&(ref k, _)| *k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-length")
+                .find(|&&(ref k, _)| *k == "Content-Length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -333,6 +325,7 @@ async fn handle_post_request(
 
     Ok(())
 }
+
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
     // Find the start of the body after headers
