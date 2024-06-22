@@ -258,9 +258,12 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variable
+        // Set query parameters as environment variables
         if let Some(query) = extract_query_string(request) {
-            cmd.env("QUERY_STRING", query);
+            for (key, value) in parse_query_string(&query) {
+                let env_var = format!("Query_{}", key);
+                cmd.env(env_var, value);
+            }
         }
 
         // Additional environment variables required by the script
@@ -268,15 +271,18 @@ async fn handle_post_request(
         cmd.env("Path", path);
 
         // Execute script
-        let output = cmd
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script")
-            .wait_with_output()
-            .await
-            .expect("Failed to read stdout");
+            .expect("Failed to execute script");
+
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin.write_all(body.as_bytes()).await.expect("Failed to write to stdin");
+        }
+
+        let output = child.wait_with_output().await.expect("Failed to read stdout");
 
         if output.status.success() {
             // Parse the output and headers from the script
@@ -285,12 +291,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Type")
+                .find(|&&(ref k, _)| k.eq_ignore_ascii_case("Content-type"))
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Length")
+                .find(|&&(ref k, _)| k.eq_ignore_ascii_case("Content-length"))
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -316,6 +322,18 @@ async fn handle_post_request(
     }
 
     Ok(())
+}
+
+// Function to parse query string into key-value pairs
+fn parse_query_string(query: &str) -> Vec<(String, String)> {
+    query.split('&').filter_map(|pair| {
+        let mut split = pair.split('=');
+        if let (Some(key), Some(value)) = (split.next(), split.next()) {
+            Some((key.to_string(), value.to_string()))
+        } else {
+            None
+        }
+    }).collect()
 }
 
 // Function to extract request body from the HTTP request
