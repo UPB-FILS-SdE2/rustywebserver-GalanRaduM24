@@ -244,6 +244,38 @@ fn determine_content_type(file_path: &Path) -> &'static str {
     }
 }
 
+// Function to extract the request body from the HTTP request
+fn extract_request_body(request: &str) -> String {
+    if let Some(index) = request.find("\r\n\r\n") {
+        request[(index + 4)..].to_string()
+    } else {
+        String::new()
+    }
+}
+
+// Function to extract the query string from the HTTP request path
+fn extract_query_string(path: &str) -> Option<String> {
+    if let Some(index) = path.find('?') {
+        Some(path[(index + 1)..].to_string())
+    } else {
+        None
+    }
+}
+
+// Function to parse headers from the script's output
+fn parse_headers(output: &str) -> (Vec<(String, String)>, usize) {
+    let mut headers = Vec::new();
+    for (i, line) in output.lines().enumerate() {
+        if line.is_empty() {
+            return (headers, i + 1);
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            headers.push((key.trim().to_string(), value.trim().to_string()));
+        }
+    }
+    (headers, output.lines().count())
+}
+
 async fn handle_post_request(
     stream: &mut TcpStream,
     root_folder: &PathBuf,
@@ -258,11 +290,12 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variable
-        if let Some(query) = extract_query_string(request) {
-            let query_params = parse_query_string(&query);
-            for (key, value) in query_params {
-                cmd.env(format!("Query_{}", key), value);
+        // Set query parameters as environment variables
+        if let Some(query) = extract_query_string(path) {
+            for param in query.split('&') {
+                if let Some((key, value)) = param.split_once('=') {
+                    cmd.env(format!("Query_{}", key), value);
+                }
             }
         }
 
@@ -293,12 +326,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
+                .find(|&&(ref k, _)| k.eq_ignore_ascii_case("Content-Type"))
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| k.to_lowercase() == "content-length")
+                .find(|&&(ref k, _)| k.eq_ignore_ascii_case("Content-Length"))
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -311,75 +344,20 @@ async fn handle_post_request(
             );
 
             // Write the response to the stream
-            stream.write_all(response.as_bytes())?;
+            stream.write_all(response.as_bytes()).await?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
             let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-            stream.write_all(response)?;
+            stream.write_all(response).await?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
         let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
-        stream.write_all(response)?;
+        stream.write_all(response).await?;
     }
 
     Ok(())
 }
-
-// Helper function to extract the request body from the HTTP request
-fn extract_request_body(request: &str) -> String {
-    let parts: Vec<&str> = request.split("\r\n\r\n").collect();
-    if parts.len() > 1 {
-        parts[1].to_string()
-    } else {
-        String::new()
-    }
-}
-
-// Helper function to extract the query string from the HTTP request
-fn extract_query_string(request: &str) -> Option<String> {
-    let parts: Vec<&str> = request.split(" ").collect();
-    if parts.len() > 1 {
-        let path_and_query: Vec<&str> = parts[1].split("?").collect();
-        if path_and_query.len() > 1 {
-            return Some(path_and_query[1].to_string());
-        }
-    }
-    None
-}
-
-// Helper function to parse query string into key-value pairs
-fn parse_query_string(query: &str) -> Vec<(String, String)> {
-    query
-        .split('&')
-        .map(|pair| {
-            let mut kv = pair.split('=');
-            (
-                kv.next().unwrap_or("").to_string(),
-                kv.next().unwrap_or("").to_string(),
-            )
-        })
-        .collect()
-}
-
-// Helper function to parse headers from script output
-fn parse_headers(output: &str) -> (Vec<(String, String)>, usize) {
-    let mut headers = Vec::new();
-    let mut body_start_index = 0;
-    for (i, line) in output.lines().enumerate() {
-        if line.is_empty() {
-            body_start_index = i + 1;
-            break;
-        } else {
-            let mut parts = line.splitn(2, ':');
-            let key = parts.next().unwrap_or("").trim().to_string();
-            let value = parts.next().unwrap_or("").trim().to_string();
-            headers.push((key, value));
-        }
-    }
-    (headers, body_start_index)
-}
-
 // Function to parse a single header line into key-value pair
 fn parse_header_line(line: &str) -> Option<(String, String)> {
     if let Some(separator_index) = line.find(':') {
