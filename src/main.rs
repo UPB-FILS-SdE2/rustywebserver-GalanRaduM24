@@ -258,9 +258,20 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variable
-        if let Some(query) = extract_query_string(request) {
-            cmd.env("QUERY_STRING", query);
+        // Set query parameters as environment variables
+        if let Some(query) = extract_query_string(path) {
+            let query_pairs = query.split('&').map(|pair| {
+                let mut split = pair.split('=');
+                (
+                    split.next().unwrap_or("").to_string(),
+                    split.next().unwrap_or("").to_string(),
+                )
+            });
+
+            for (key, value) in query_pairs {
+                let env_var = format!("Query_{}", key);
+                cmd.env(env_var, value);
+            }
         }
 
         // Additional environment variables required by the script
@@ -293,12 +304,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-type")
+                .find(|&&(ref k, _)| *k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-length")
+                .find(|&&(ref k, _)| *k == "Content-Length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -336,24 +347,14 @@ fn extract_request_body(request: &str) -> String {
     }
 }
 
-// Function to extract query string from the HTTP request
-fn extract_query_string(request: &str) -> Option<&str> {
-    // Find the start of the request line
-    if let Some(start_index) = request.find("\r\n") {
-        let request_line = &request[..start_index];
-
-        // Find the start of the query string (after the method and path)
-        if let Some(path_index) = request_line.find(' ') {
-            if let Some(query_start) = request_line[path_index..].find('?') {
-                let query_start = path_index + query_start + 1; // Skip '?'
-                if let Some(query_end) = request_line[path_index + query_start..].find(' ') {
-                    return Some(&request_line[path_index + query_start..path_index + query_start + query_end]);
-                }
-            }
-        }
+// Function to extract query string from the path
+fn extract_query_string(path: &str) -> Option<&str> {
+    // Find the start of the query string (after the path)
+    if let Some(query_start) = path.find('?') {
+        Some(&path[query_start + 1..])
+    } else {
+        None
     }
-
-    None
 }
 
 // Function to parse headers from the script output
