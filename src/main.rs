@@ -255,10 +255,18 @@ async fn handle_post_request(
     if full_path.is_file() {
         let mut cmd = Command::new(&full_path);
 
-        // Extract request body to pass as input to script
+        // Extract request body to pass as input to the script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variable
+        // Extract headers from the request
+        let headers = extract_headers(request);
+
+        // Set headers as environment variables
+        for (key, value) in &headers {
+            cmd.env(key, value);
+        }
+
+        // Set query parameters as environment variables
         if let Some(query) = extract_query_string(request) {
             cmd.env("QUERY_STRING", query);
         }
@@ -268,12 +276,19 @@ async fn handle_post_request(
         cmd.env("Path", path);
 
         // Execute script
-        let output = cmd
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script")
+            .expect("Failed to execute script");
+
+        // Pass the body to the script's stdin
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(body.as_bytes()).await?;
+        }
+
+        let output = child
             .wait_with_output()
             .await
             .expect("Failed to read stdout");
@@ -316,6 +331,20 @@ async fn handle_post_request(
     }
 
     Ok(())
+}
+
+// Function to extract headers from the HTTP request
+fn extract_headers(request: &str) -> Vec<(String, String)> {
+    let mut headers = Vec::new();
+    for line in request.lines().skip(1) {
+        if line.is_empty() {
+            break;
+        }
+        if let Some((key, value)) = parse_header_line(line) {
+            headers.push((key, value));
+        }
+    }
+    headers
 }
 
 // Function to extract request body from the HTTP request
