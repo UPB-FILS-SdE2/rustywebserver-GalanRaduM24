@@ -244,6 +244,7 @@ fn determine_content_type(file_path: &Path) -> &'static str {
     }
 }
 
+// Asynchronous function to handle GET requests
 async fn handle_post_request(
     stream: &mut TcpStream,
     root_folder: &PathBuf,
