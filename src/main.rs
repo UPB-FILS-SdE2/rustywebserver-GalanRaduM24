@@ -297,7 +297,7 @@ async fn handle_post_request(
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Length")
+                .find(|&&(ref k, _)| *k == "Content-length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
