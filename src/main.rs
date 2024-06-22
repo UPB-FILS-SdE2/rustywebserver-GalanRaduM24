@@ -268,19 +268,15 @@ async fn handle_post_request(
         cmd.env("Path", path);
 
         // Execute script
-        let mut child = cmd
+        let output = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script");
-
-        // Write request body to the script's stdin
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(body.as_bytes()).await.expect("Failed to write to stdin");
-        }
-
-        let output = child.wait_with_output().await.expect("Failed to read stdout");
+            .expect("Failed to execute script")
+            .wait_with_output()
+            .await
+            .expect("Failed to read stdout");
 
         if output.status.success() {
             // Parse the output and headers from the script
@@ -289,16 +285,21 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| k.eq_ignore_ascii_case("Content-type"))
+                .find(|&&(ref k, _)| *k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
+            let content_length = headers
+                .iter()
+                .find(|&&(ref k, _)| *k == "Content-Length")
+                .map(|&(_, ref v)| v.clone())
+                .unwrap_or_else(|| body.len().to_string());
 
             println!("POST 127.0.0.1 {} -> 200 (OK)", path);
 
             // Construct the HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                content_type, body.len(), body
+                content_type, content_length, body
             );
 
             // Write the response to the stream
