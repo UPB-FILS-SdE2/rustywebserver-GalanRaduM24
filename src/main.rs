@@ -258,38 +258,26 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variables
-        if let Some(query) = extract_query_string(path) {
-            for param in query.split('&') {
-                if let Some((key, value)) = param.split_once('=') {
-                    cmd.env(format!("Query_{}", key), value);
-                }
-            }
+        // Set query parameters as environment variable
+        if let Some(query) = extract_query_string(request) {
+            cmd.env("QUERY_STRING", query);
         }
 
         // Additional environment variables required by the script
         cmd.env("Method", "POST");
         cmd.env("Path", path);
 
-
         // Execute script
-        let mut child = cmd
+        let output = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script");
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(body.as_bytes()).await?;
-            // Explicitly drop stdin to close it and signal end of input
-            drop(stdin);
-        }
-
-        let output = child
+            .expect("Failed to execute script")
             .wait_with_output()
             .await
             .expect("Failed to read stdout");
+
         if output.status.success() {
             // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
@@ -362,17 +350,27 @@ fn extract_query_string(request: &str) -> Option<&str> {
 }
 
 // Function to parse headers from the script output
-fn parse_headers(output: &str) -> (Vec<(String, String)>, usize) {
+fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
-    for (i, line) in output.lines().enumerate() {
+    let mut body_start_index = 0;
+
+    // Split the response into lines
+    let lines: Vec<&str> = response.lines().collect();
+
+    // Iterate over lines to parse headers
+    for (index, line) in lines.iter().enumerate() {
         if line.is_empty() {
-            return (headers, i + 1);
+            // Empty line indicates end of headers, body starts after this
+            body_start_index = index + 1;
+            break;
         }
-        if let Some((key, value)) = line.split_once(':') {
-            headers.push((key.trim().to_string(), value.trim().to_string()));
+
+        // Split each line into key-value pairs
+        if let Some((key, value)) = parse_header_line(line) {
+            headers.push((key, value));
         }
     }
-    (headers, output.lines().count())
+    (headers, body_start_index)
 }
 
 // Function to parse a single header line into key-value pair
