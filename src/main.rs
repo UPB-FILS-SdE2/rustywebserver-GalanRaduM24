@@ -308,26 +308,28 @@ async fn handle_post_request(
             );
 
             // Write the response to the stream
-            stream.write_all(response.as_bytes())?;
+            stream.write_all(response.as_bytes()).await?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
             let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-            stream.write_all(response)?;
+            stream.write_all(response).await?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
         let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
-        stream.write_all(response)?;
+        stream.write_all(response).await?;
     }
 
     Ok(())
 }
 
 
+// Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
-    let parts: Vec<&str> = request.split("\r\n\r\n").collect();
-    if parts.len() > 1 {
-        parts[1..].join("\r\n\r\n")
+    // Find the start of the body after headers
+    if let Some(start_index) = request.find("\r\n\r\n") {
+        let body_start = start_index + 4; // Skip "\r\n\r\n"
+        request[body_start..].to_string()
     } else {
         String::new()
     }
