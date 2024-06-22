@@ -315,16 +315,16 @@ async fn handle_post_request(
             );
 
             // Write the response to the stream
-            stream.write_all(response.as_bytes()).await?;
+            stream.write_all(response.as_bytes())?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
             let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
-            stream.write_all(response).await?;
+            stream.write_all(response)?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
         let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
-        stream.write_all(response).await?;
+        stream.write_all(response)?;
     }
 
     Ok(())
