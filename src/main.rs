@@ -267,7 +267,6 @@ async fn handle_post_request(
         cmd.env("Method", "POST");
         cmd.env("Path", path);
 
-        // Execute script
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -284,7 +283,6 @@ async fn handle_post_request(
             .await
             .expect("Failed to read stdout");
 
-
         if output.status.success() {
             // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
@@ -292,12 +290,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Type")
+                .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Length")
+                .find(|&&(ref k, _)| k.to_lowercase() == "content-length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
