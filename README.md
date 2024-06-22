@@ -21,11 +21,6 @@ This Rust program implements a simple HTTP server capable of handling GET and PO
 - std::path: Manages file and directory paths.
 - std::process: Invokes processes and manages their input/output streams.
 
-## Usage
-To run the server, compile the Rust code and provide two command-line arguments:
-
-`$ cargo run <port> <root_folder>`
-
 ### HTTP Methods Supported
 - GET: Retrieves static files and executes scripts under /scripts.
 - POST: Executes scripts located in the requested path with input from the request body.
