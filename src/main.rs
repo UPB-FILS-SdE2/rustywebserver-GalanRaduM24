@@ -258,19 +258,9 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variables
-        if let Some(query_string) = extract_query_string(request) {
-            let query_pairs = query_string.split('&').map(|pair| {
-                let mut split = pair.split('=');
-                (
-                    format!("Query_{}", split.next().unwrap_or("")),
-                    split.next().unwrap_or("").to_string(),
-                )
-            });
-
-            for (key, value) in query_pairs {
-                cmd.env(&key, &value);
-            }
+        // Set query parameters as environment variable
+        if let Some(query) = extract_query_string(request) {
+            cmd.env("QUERY_STRING", query);
         }
 
         // Additional environment variables required by the script
@@ -278,20 +268,12 @@ async fn handle_post_request(
         cmd.env("Path", path);
 
         // Execute script
-        let mut child = cmd
+        let output = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script");
-
-        // Write the request body to the script's stdin
-        if let Some(stdin) = &mut child.stdin {
-            stdin.write_all(body.as_bytes()).await.expect("Failed to write to stdin");
-        }
-
-        // Wait for the script to complete and capture its output
-        let output = child
+            .expect("Failed to execute script")
             .wait_with_output()
             .await
             .expect("Failed to read stdout");
@@ -303,12 +285,12 @@ async fn handle_post_request(
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-type")
+                .find(|&&(ref k, _)| *k == "Content-Type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-length")
+                .find(|&&(ref k, _)| *k == "Content-Length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -318,18 +300,19 @@ async fn handle_post_request(
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 content_type, content_length, body
-            ).as_bytes().to_vec();
-            
-            stream.write_all(&response)?;
+            );
+
+            // Write the response to the stream
+            stream.write_all(response.as_bytes())?;
         } else {
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
-            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>".to_vec();
-            stream.write_all(&response)?;
+            let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
+            stream.write_all(response)?;
         }
     } else {
         println!("POST 127.0.0.1 {} -> 404 (Not Found)", path);
-        let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>".to_vec();
-        stream.write_all(&response)?;
+        let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
+        stream.write_all(response)?;
     }
 
     Ok(())
