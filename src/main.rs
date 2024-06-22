@@ -331,13 +331,9 @@ async fn handle_post_request(
 
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
-    // Find the start of the body after headers
-    if let Some(start_index) = request.find("\r\n\r\n") {
-        let body_start = start_index + 4; // Skip "\r\n\r\n"
-        request[body_start..].to_string()
-    } else {
-        String::new()
-    }
+    let mut headers_body_split = request.split("\r\n\r\n");
+    headers_body_split.next(); // Skip headers
+    headers_body_split.next().unwrap_or("").to_string() // Get body
 }
 
 // Function to extract query string from the HTTP request
@@ -363,24 +359,19 @@ fn extract_query_string(request: &str) -> Option<&str> {
 // Function to parse headers from the script output
 fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
+    let mut lines = response.lines();
     let mut body_start_index = 0;
 
-    // Split the response into lines
-    let lines: Vec<&str> = response.lines().collect();
-
-    // Iterate over lines to parse headers
-    for (index, line) in lines.iter().enumerate() {
+    for (i, line) in lines.by_ref().enumerate() {
         if line.is_empty() {
-            // Empty line indicates end of headers, body starts after this
-            body_start_index = index + 1;
+            body_start_index = i + 1;
             break;
         }
-
-        // Split each line into key-value pairs
-        if let Some((key, value)) = parse_header_line(line) {
-            headers.push((key, value));
+        if let Some((key, value)) = line.split_once(": ") {
+            headers.push((key.to_string(), value.to_string()));
         }
     }
+    
     (headers, body_start_index)
 }
 
