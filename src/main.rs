@@ -324,58 +324,39 @@ async fn handle_post_request(
 }
 
 
-// Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
-    // Find the start of the body after headers
-    if let Some(start_index) = request.find("\r\n\r\n") {
-        let body_start = start_index + 4; // Skip "\r\n\r\n"
-        request[body_start..].to_string()
+    let parts: Vec<&str> = request.split("\r\n\r\n").collect();
+    if parts.len() > 1 {
+        parts[1..].join("\r\n\r\n")
     } else {
         String::new()
     }
 }
 
-// Function to extract query string from the HTTP request
-fn extract_query_string(request: &str) -> Option<&str> {
-    // Find the start of the request line
-    if let Some(start_index) = request.find("\r\n") {
-        let request_line = &request[..start_index];
-
-        // Find the start of the query string (after the method and path)
-        if let Some(path_index) = request_line.find(' ') {
-            if let Some(query_start) = request_line[path_index..].find('?') {
-                let query_start = path_index + query_start + 1; // Skip '?'
-                if let Some(query_end) = request_line[path_index + query_start..].find(' ') {
-                    return Some(&request_line[path_index + query_start..path_index + query_start + query_end]);
-                }
-            }
+fn extract_query_string(request: &str) -> Option<String> {
+    if let Some(start) = request.find('?') {
+        if let Some(end) = request[start..].find(' ') {
+            return Some(request[start + 1..start + end].to_string());
         }
     }
-
     None
 }
 
-// Function to parse headers from the script output
 fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
     let mut body_start_index = 0;
 
-    // Split the response into lines
-    let lines: Vec<&str> = response.lines().collect();
-
-    // Iterate over lines to parse headers
-    for (index, line) in lines.iter().enumerate() {
+    for (i, line) in response.lines().enumerate() {
         if line.is_empty() {
-            // Empty line indicates end of headers, body starts after this
-            body_start_index = index + 1;
+            body_start_index = i + 1;
             break;
         }
 
-        // Split each line into key-value pairs
-        if let Some((key, value)) = parse_header_line(line) {
-            headers.push((key, value));
+        if let Some((key, value)) = line.split_once(": ") {
+            headers.push((key.to_string(), value.to_string()));
         }
     }
+
     (headers, body_start_index)
 }
 
