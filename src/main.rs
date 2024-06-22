@@ -299,7 +299,7 @@ async fn handle_post_request(
             // Construct the HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                content_type, body.len(), body
+                content_type, content_length, body
             );
 
             // Write the response to the stream
@@ -350,27 +350,17 @@ fn extract_query_string(request: &str) -> Option<&str> {
 }
 
 // Function to parse headers from the script output
-fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
+fn parse_headers(output: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
-    let mut body_start_index = 0;
-
-    // Split the response into lines
-    let lines: Vec<&str> = response.lines().collect();
-
-    // Iterate over lines to parse headers
-    for (index, line) in lines.iter().enumerate() {
+    for (i, line) in output.lines().enumerate() {
         if line.is_empty() {
-            // Empty line indicates end of headers, body starts after this
-            body_start_index = index + 1;
-            break;
+            return (headers, i + 1);
         }
-
-        // Split each line into key-value pairs
-        if let Some((key, value)) = parse_header_line(line) {
-            headers.push((key, value));
+        if let Some((key, value)) = line.split_once(':') {
+            headers.push((key.trim().to_string(), value.trim().to_string()));
         }
     }
-    (headers, body_start_index)
+    (headers, output.lines().count())
 }
 
 // Function to parse a single header line into key-value pair
