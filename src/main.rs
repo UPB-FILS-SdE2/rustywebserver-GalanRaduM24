@@ -258,9 +258,18 @@ async fn handle_post_request(
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
 
-        // Set query parameters as environment variable
+        // Extract query string and set as environment variables
         if let Some(query) = extract_query_string(request) {
-            cmd.env("QUERY_STRING", query);
+            let query_pairs = query.split('&').map(|pair| {
+                let mut split = pair.split('=');
+                (
+                    format!("Query_{}", split.next().unwrap_or("")),
+                    split.next().unwrap_or("").to_string(),
+                )
+            });
+            for (key, value) in query_pairs {
+                cmd.env(key, value);
+            }
         }
 
         // Additional environment variables required by the script
