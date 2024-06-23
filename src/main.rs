@@ -296,20 +296,27 @@ async fn handle_post_request(
             // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
             let (headers, body_start_index) = parse_headers(&output_str);
-            let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+
+            // Find the start of the actual body content
+            let body_content = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
+
+            // Trim any trailing null terminators from the body content
+            let trimmed_body = body_content.trim_end_matches(char::from(0));
+
             let content_type = headers
                 .iter()
                 .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
-            let content_length = body.len();
+
+            let content_length = trimmed_body.len(); // Calculate the trimmed body length
 
             println!("POST 127.0.0.1 {} -> 200 (OK)", path);
 
             // Construct the HTTP response
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                content_type, content_length, body
+                content_type, content_length, trimmed_body
             );
 
             // Write the response to the stream
