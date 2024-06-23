@@ -15,8 +15,8 @@ This project demonstrates a basic HTTP server written in Rust using the Tokio as
 
 ## Structure
 - main.rs: Entry point of the server, handles command-line arguments, starts the TCP listener, and delegates incoming connections to handle_connection.
-- handle_connection: Asynchronously handles each incoming TCP connection, parsing HTTP requests, and dispatching to appropriate request handlers (handle_get_request or handle_post_request).
-- Request Handlers: Functions (handle_get_request, handle_post_request) process GET and POST requests respectively, serving static files or executing scripts.
+- connection: Asynchronously handles each incoming TCP connection, parsing HTTP requests, and dispatching to appropriate request handlers (handle_get_request or handle_post_request).
+- Request Handlers: Functions (get, post) process GET and POST requests respectively, serving static files or executing scripts.
 
 ### HTTP Methods Supported
 - GET: Retrieves static files and executes scripts under /scripts.
