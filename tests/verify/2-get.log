@@ -1,8 +1,0 @@
-Root folder: /Users/bender/software/sde2/rustywebserver-alexandruradovici/rustywebserver-tests/public
-Server listening on 0.0.0.0:8000
-GET 127.0.0.1 /scripts/simple.sh -> 200 (OK)
-GET 127.0.0.1 /scripts/env.sh -> 200 (OK)
-GET 127.0.0.1 /scripts/fail.sh -> 500 (Internal Server Error)
-GET 127.0.0.1 /scripts/print_query_string.sh -> 200 (OK)
-GET 127.0.0.1 /scripts/print_method.sh -> 200 (OK)
-GET 127.0.0.1 /scripts/print_method.sh -> 200 (OK)

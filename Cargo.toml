@@ -9,3 +9,4 @@ edition = "2021"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", features = ["blocking"] }
 mime_guess = "2.0"
+urldecode = "0.1.1"
