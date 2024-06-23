@@ -5,21 +5,18 @@ Detail the homework implementation.
 
 
 # Overview
-This Rust program implements a simple HTTP server capable of handling GET and POST requests. It serves static files from a specified root directory and can execute scripts located in a /scripts directory relative to the root. The server uses Tokio for asynchronous handling of connections and processes.
+This project demonstrates a basic HTTP server written in Rust using the Tokio asynchronous runtime. It handles GET and POST requests, serves static files, and executes scripts located in a specified root folder.
 
 ## Features
 - GET Requests: Handles requests for static files and executes scripts under /scripts.
 - POST Requests: Executes scripts located in the requested path with input from the request body.
+- Static File Serving: Determines and serves appropriate content types based on file extensions.
 - Error Handling: Responds with appropriate HTTP status codes (404, 403, 405, 500) and error messages for various scenarios.
 
-## Dependencies
-- tokio: Used for asynchronous programming and handling I/O operations concurrently.
-- std::env: For accessing command-line arguments and environment variables.
-- std::fs: Provides file system operations like reading files.
-- std::io: Handles input-output operations, including reading from and writing to TCP streams.
-- std::net: Used for TCP listener and stream operations.
-- std::path: Manages file and directory paths.
-- std::process: Invokes processes and manages their input/output streams.
+## Structure
+- main.rs: Entry point of the server, handles command-line arguments, starts the TCP listener, and delegates incoming connections to handle_connection.
+- handle_connection: Asynchronously handles each incoming TCP connection, parsing HTTP requests, and dispatching to appropriate request handlers (handle_get_request or handle_post_request).
+- Request Handlers: Functions (handle_get_request, handle_post_request) process GET and POST requests respectively, serving static files or executing scripts.
 
 ### HTTP Methods Supported
 - GET: Retrieves static files and executes scripts under /scripts.
