@@ -262,7 +262,7 @@ async fn handle_post_request(
         // Set query parameters as environment variable
         if let Some(query) = extract_query_string(request) {
             cmd.env("QUERY_STRING", query);
-            println!("Set QUERY_STRING: {}", query);
+            //println!("Set QUERY_STRING: {}", query);
         }
 
         // Additional environment variables required by the script
