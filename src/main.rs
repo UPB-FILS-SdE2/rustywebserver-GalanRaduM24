@@ -353,8 +353,8 @@ fn extract_query_string(request: &str) -> Option<&str> {
         if let Some(path_index) = request_line.find(' ') {
             if let Some(query_start) = request_line[path_index..].find('?') {
                 let query_start = path_index + query_start + 1; // Skip '?'
-                if let Some(query_end) = request_line[path_index + query_start..].find(' ') {
-                    return Some(&request_line[path_index + query_start..path_index + query_start + query_end]);
+                if let Some(query_end) = request_line[query_start..].find(' ') {
+                    return Some(&request_line[query_start..query_start + query_end]);
                 }
             }
         }
