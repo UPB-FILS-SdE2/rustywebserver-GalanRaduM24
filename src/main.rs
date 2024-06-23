@@ -16,6 +16,7 @@ async fn main() -> io::Result<()> {
         std::process::exit(1);
     }
 
+    // Extract port number and root folder from command-line arguments
     let port = args[1].parse::<u16>().expect("Invalid port number");
     let root_folder = PathBuf::from(&args[2]);
 
@@ -23,13 +24,14 @@ async fn main() -> io::Result<()> {
     println!("Root folder: {}", root_folder.display());
     println!("Server listening on 0.0.0.0:{}", port);
 
-    // Start server
+    // Start TCP listener
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))?;
     loop {
         // Accept incoming connections
         let (stream, _) = listener.accept()?;
         let root_folder = root_folder.clone();
-        // Handle each connection in a separate task
+
+        // Handle each connection in a separate asynchronous task
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream, root_folder).await {
                 eprintln!("Error handling connection: {}", e);
@@ -38,6 +40,7 @@ async fn main() -> io::Result<()> {
     }
 }
 
+/// Asynchronously handle each incoming TCP connection.
 async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
     // Read HTTP request
     let mut buffer = [0; 1024];
@@ -100,6 +103,7 @@ async fn handle_get_request(
     query: Option<String>,
     headers: &[(String, String)], // Add headers parameter
 ) -> io::Result<()> {
+
     // Construct the full path to the requested file
     let full_path = root_folder.join(&path[1..]); // Remove the leading '/' from the path
 
@@ -244,6 +248,7 @@ fn determine_content_type(file_path: &Path) -> &'static str {
     }
 }
 
+// Asynchronous function to handle POST requests
 async fn handle_post_request(
     stream: &mut TcpStream,
     root_folder: &PathBuf,
@@ -337,6 +342,7 @@ async fn handle_post_request(
 
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
+
     // Find the start of the body after headers
     if let Some(start_index) = request.find("\r\n\r\n") {
         let body_start = start_index + 4; // Skip "\r\n\r\n"
@@ -348,6 +354,7 @@ fn extract_request_body(request: &str) -> String {
 
 // Function to extract query string from the HTTP request
 fn extract_query_string(request: &str) -> Option<&str> {
+    
     // Find the start of the request line
     if let Some(start_index) = request.find("\r\n") {
         let request_line = &request[..start_index];
