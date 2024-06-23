@@ -302,11 +302,7 @@ async fn handle_post_request(
                 .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
-            let content_length = headers
-                .iter()
-                .find(|&&(ref k, _)| k.to_lowercase() == "content-length")
-                .map(|&(_, ref v)| v.clone())
-                .unwrap_or_else(|| body.len().to_string());
+            let content_length = body.len();
 
             println!("POST 127.0.0.1 {} -> 200 (OK)", path);
 
@@ -380,10 +376,13 @@ fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
         }
 
         // Split each line into key-value pairs
-        if let Some((key, value)) = parse_header_line(line) {
+        if let Some(separator_index) = line.find(':') {
+            let key = line[..separator_index].trim().to_string();
+            let value = line[separator_index + 1..].trim().to_string();
             headers.push((key, value));
         }
     }
+
     (headers, body_start_index)
 }
 
