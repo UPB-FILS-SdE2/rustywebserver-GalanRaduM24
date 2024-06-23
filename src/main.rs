@@ -267,16 +267,23 @@ async fn handle_post_request(
         cmd.env("Method", "POST");
         cmd.env("Path", path);
 
-        // Execute script
-        let output = cmd
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to execute script")
+            .expect("Failed to execute script");
+
+        // Pass the request body to the child process's stdin
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(body.as_bytes()).await?;
+        }
+
+        // Wait for the child process to complete and capture its output
+        let output = child
             .wait_with_output()
             .await
-            .expect("Failed to read stdout");
+            .expect("Failed to wait for child process");
 
         if output.status.success() {
             // Parse the output and headers from the script
@@ -318,6 +325,7 @@ async fn handle_post_request(
     Ok(())
 }
 
+
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
     // Find the start of the body after headers
@@ -349,7 +357,6 @@ fn extract_query_string(request: &str) -> Option<&str> {
     None
 }
 
-// Function to parse headers from the script output
 fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
     let mut headers = Vec::new();
     let mut body_start_index = 0;
@@ -370,6 +377,7 @@ fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
             headers.push((key, value));
         }
     }
+
     (headers, body_start_index)
 }
 
