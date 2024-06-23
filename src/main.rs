@@ -33,7 +33,7 @@ async fn main() -> io::Result<()> {
 
         // Handle each connection in a separate asynchronous task
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, root_folder).await {
+            if let Err(e) = connection(stream, root_folder).await {
                 eprintln!("Error handling connection: {}", e);
             }
         });
@@ -41,7 +41,7 @@ async fn main() -> io::Result<()> {
 }
 
 /// Asynchronously handle each incoming TCP connection.
-async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
+async fn connection(mut stream: TcpStream, root_folder: PathBuf) -> io::Result<()> {
     // Read HTTP request
     let mut buffer = [0; 1024];
     stream.read(&mut buffer)?;
@@ -84,8 +84,8 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
 
     // Delegate to the appropriate handler based on the HTTP method
     match method.as_str() {
-        "GET" => handle_get_request( &mut stream, &root_folder, &path, query, &headers).await, 
-        "POST" => handle_post_request(&mut stream, &root_folder, &path, &request).await,
+        "GET" => get( &mut stream, &root_folder, &path, query, &headers).await, 
+        "POST" => post(&mut stream, &root_folder, &path, &request).await,
         _ => {
             println!("{} 127.0.0.1 {} -> 405 (Method Not Allowed)", method, path);
             let response = b"HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n<html>405 Method Not Allowed</html>";
@@ -96,7 +96,7 @@ async fn handle_connection(mut stream: TcpStream, root_folder: PathBuf) -> io::R
 }
 
 // Asynchronous function to handle GET requests
-async fn handle_get_request(
+async fn get(
     stream: &mut TcpStream,
     root_folder: &Path,
     path: &str,
@@ -135,7 +135,7 @@ async fn handle_get_request(
         let contents = fs::read(&full_path)?;
 
         // Determine the content type of the file
-        let content_type = determine_content_type(&full_path);
+        let content_type = content_type(&full_path);
 
         // Construct the HTTP response
         println!("GET 127.0.0.1 {} -> 200 (OK)", path);
@@ -234,7 +234,7 @@ async fn execute_script(
 
 
 // Determine the content type based on file extension
-fn determine_content_type(file_path: &Path) -> &'static str {
+fn content_type(file_path: &Path) -> &'static str {
     match file_path.extension().and_then(|ext| ext.to_str()) {
         Some("txt") => "text/plain; charset=utf-8",
         Some("html") => "text/html; charset=utf-8",
@@ -249,7 +249,7 @@ fn determine_content_type(file_path: &Path) -> &'static str {
 }
 
 // Asynchronous function to handle POST requests
-async fn handle_post_request(
+async fn post(
     stream: &mut TcpStream,
     root_folder: &PathBuf,
     path: &str,
