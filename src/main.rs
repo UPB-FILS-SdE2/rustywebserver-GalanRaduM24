@@ -257,12 +257,10 @@ async fn handle_post_request(
 
         // Extract request body to pass as input to script
         let body = extract_request_body(request);
-        println!("Extracted body: {}", body);
 
         // Set query parameters as environment variable
         if let Some(query) = extract_query_string(request) {
             cmd.env("QUERY_STRING", query);
-            //println!("Set QUERY_STRING: {}", query);
         }
 
         // Additional environment variables required by the script
@@ -276,32 +274,28 @@ async fn handle_post_request(
             .spawn()
             .expect("Failed to execute script");
 
-        // Pass the request body to the child process's stdin
         if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(body.as_bytes()).await?;
-            println!("Wrote to stdin");
         }
 
-        // Wait for the child process to complete and capture its output
         let output = child
             .wait_with_output()
             .await
-            .expect("Failed to wait for child process");
+            .expect("Failed to read stdout");
 
         if output.status.success() {
             // Parse the output and headers from the script
             let output_str = String::from_utf8_lossy(&output.stdout);
-            println!("Script output: {}", output_str);
             let (headers, body_start_index) = parse_headers(&output_str);
             let body = output_str.lines().skip(body_start_index).collect::<Vec<_>>().join("\n");
             let content_type = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Type")
+                .find(|&&(ref k, _)| k.to_lowercase() == "content-type")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
             let content_length = headers
                 .iter()
-                .find(|&&(ref k, _)| *k == "Content-Length")
+                .find(|&&(ref k, _)| k.to_lowercase() == "content-length")
                 .map(|&(_, ref v)| v.clone())
                 .unwrap_or_else(|| body.len().to_string());
 
@@ -316,8 +310,6 @@ async fn handle_post_request(
             // Write the response to the stream
             stream.write_all(response.as_bytes())?;
         } else {
-            let stderr_str = String::from_utf8_lossy(&output.stderr);
-            println!("Script error output: {}", stderr_str);
             println!("POST 127.0.0.1 {} -> 500 (Internal Server Error)", path);
             let response = b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n<html>500 Internal Server Error</html>";
             stream.write_all(response)?;
@@ -331,13 +323,15 @@ async fn handle_post_request(
     Ok(())
 }
 
-
 // Function to extract request body from the HTTP request
 fn extract_request_body(request: &str) -> String {
-    if let Some(body_start) = request.find("\r\n\r\n") {
-        return request[(body_start + 4)..].to_string();
+    // Find the start of the body after headers
+    if let Some(start_index) = request.find("\r\n\r\n") {
+        let body_start = start_index + 4; // Skip "\r\n\r\n"
+        request[body_start..].to_string()
+    } else {
+        String::new()
     }
-    "".to_string()
 }
 
 // Function to extract query string from the HTTP request
@@ -381,7 +375,6 @@ fn parse_headers(response: &str) -> (Vec<(String, String)>, usize) {
             headers.push((key, value));
         }
     }
-
     (headers, body_start_index)
 }
 
